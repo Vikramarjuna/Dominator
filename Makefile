@@ -75,13 +75,16 @@ all:
 
 build: build-$(BUILD_OS)$(BUILD_ARCH_SUFFIX)
 
+# Darwin builds exclude Linux-only commands
+DARWIN_CMDS := $(filter-out ./cmd/installer ./cmd/subd ./cmd/image-unpacker ./cmd/imaginator,$(wildcard ./cmd/*))
+
 build-darwin:
 	@mkdir -p $(DIST_DIR)
-	CGO_ENABLED=0 GOOS=darwin go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/ ./cmd/*
+	CGO_ENABLED=0 GOOS=darwin go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/ $(DARWIN_CMDS)
 
 build-darwin-arm:
 	@mkdir -p $(DIST_DIR)
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/ ./cmd/*
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/ $(DARWIN_CMDS)
 
 build-linux:
 	@mkdir -p $(DIST_DIR)
