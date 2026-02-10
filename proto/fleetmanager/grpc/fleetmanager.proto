@@ -1,0 +1,255 @@
+syntax = "proto3";
+
+package fleetmanager;
+
+option go_package = "github.com/Cloud-Foundations/Dominator/proto/fleetmanager/grpc";
+
+import "google/api/annotations.proto";
+import "common/grpc/common.proto";
+import "hypervisor/grpc/hypervisor.proto";
+
+// FleetManager service - embedded gRPC interface for fleet-manager daemon
+service FleetManager {
+  // Unary RPCs
+  rpc GetMachineInfo(GetMachineInfoRequest) returns (GetMachineInfoResponse) {
+    option (google.api.http) = {
+      get: "/v1/machines/{hostname}"
+    };
+  }
+
+  rpc GetHypervisorForVM(GetHypervisorForVMRequest) returns (GetHypervisorForVMResponse) {
+    option (google.api.http) = {
+      get: "/v1/vms/hypervisor"
+    };
+  }
+
+  rpc ListHypervisorLocations(ListHypervisorLocationsRequest) returns (ListHypervisorLocationsResponse) {
+    option (google.api.http) = {
+      get: "/v1/locations"
+    };
+  }
+
+  rpc ListHypervisorsInLocation(ListHypervisorsInLocationRequest) returns (ListHypervisorsInLocationResponse) {
+    option (google.api.http) = {
+      get: "/v1/locations/{location}/hypervisors"
+    };
+  }
+
+  rpc PowerOnMachine(PowerOnMachineRequest) returns (PowerOnMachineResponse) {
+    option (google.api.http) = {
+      post: "/v1/machines/{hostname}/power-on"
+    };
+  }
+
+  rpc ChangeMachineTags(ChangeMachineTagsRequest) returns (ChangeMachineTagsResponse) {
+    option (google.api.http) = {
+      patch: "/v1/machines/{hostname}/tags"
+      body: "*"
+    };
+  }
+
+  rpc GetHypervisorsInLocation(GetHypervisorsInLocationRequest) returns (GetHypervisorsInLocationResponse) {
+    option (google.api.http) = {
+      post: "/v1/locations/{location}/hypervisors/query"
+      body: "*"
+    };
+  }
+
+  rpc GetIpInfo(GetIpInfoRequest) returns (GetIpInfoResponse) {
+    option (google.api.http) = {
+      get: "/v1/ips/info"
+    };
+  }
+
+  rpc MoveIpAddresses(MoveIpAddressesRequest) returns (MoveIpAddressesResponse) {
+    option (google.api.http) = {
+      post: "/v1/hypervisors/{hypervisor_hostname}/move-ips"
+      body: "*"
+    };
+  }
+
+  rpc ListVMsInLocation(ListVMsInLocationRequest) returns (ListVMsInLocationResponse) {
+    option (google.api.http) = {
+      get: "/v1/locations/{location}/vms"
+    };
+  }
+
+  // Server streaming RPCs
+  rpc GetUpdates(GetUpdatesRequest) returns (stream Update) {
+    option (google.api.http) = {
+      get: "/v1/updates"
+    };
+  }
+}
+
+// ChangeMachineTags
+message ChangeMachineTagsRequest {
+  string hostname = 1;
+  common.Tags tags = 2;
+}
+
+message ChangeMachineTagsResponse {
+  // Empty response - errors are returned via gRPC status codes
+}
+
+// GetMachineInfo
+message GetMachineInfoRequest {
+  string hostname = 1;
+  bool ignore_missing_local_tags = 2;
+}
+
+message GetMachineInfoResponse {
+  string location = 1;
+  Machine machine = 2;
+  repeated hypervisor.Subnet subnets = 3;
+}
+
+// GetHypervisorForVM
+message GetHypervisorForVMRequest {
+  bytes ip_address = 1;  // net.IP is []byte
+}
+
+message GetHypervisorForVMResponse {
+  string hypervisor_address = 1;  // host:port
+}
+
+// ListHypervisorLocations
+message ListHypervisorLocationsRequest {
+  string top_location = 1;
+}
+
+message ListHypervisorLocationsResponse {
+  repeated string locations = 1;
+}
+
+// ListHypervisorsInLocation
+message ListHypervisorsInLocationRequest {
+  common.MatchTags hypervisor_tags_to_match = 1;
+  bool include_unhealthy = 2;
+  string location = 3;
+  string subnet_id = 4;
+  repeated string tags_to_include = 5;
+}
+
+message ListHypervisorsInLocationResponse {
+  repeated string hypervisor_addresses = 1;  // host:port
+  repeated common.Tags tags_for_hypervisors = 2;
+}
+
+// GetUpdates (streaming)
+// Standard gRPC watch pattern - client controls stream lifetime via context cancellation
+message GetUpdatesRequest {
+  bool ignore_missing_local_tags = 1;
+  string location = 2;
+  // Note: No max_updates field - use context cancellation to stop the stream
+  // This follows standard gRPC patterns used by Kubernetes, etcd, etc.
+}
+
+message Update {
+  repeated Machine changed_machines = 1;
+  map<string, hypervisor.VmInfo> changed_vms = 2;  // Key: IP address
+  repeated string deleted_machines = 3;  // Hostname
+  repeated string deleted_vms = 4;       // IP address
+  map<string, string> vm_to_hypervisor = 5;  // IP:hostname
+  // Note: errors are returned via gRPC status codes, not in the message
+}
+
+// ListVMsInLocation (with pagination support)
+message ListVMsInLocationRequest {
+  common.MatchTags hypervisor_tags_to_match = 1;
+  string location = 2;
+  repeated string owner_groups = 3;
+  repeated string owner_users = 4;
+  common.MatchTags vm_tags_to_match = 5;
+
+  // Pagination support (optional)
+  int32 page_size = 6;   // 0 or omitted = return all VMs
+  string page_token = 7; // Token for fetching next page
+}
+
+message ListVMsInLocationResponse {
+  repeated bytes ip_addresses = 1;  // net.IP is []byte
+  string next_page_token = 2;       // Empty = no more results
+}
+
+// PowerOnMachine
+message PowerOnMachineRequest {
+  string hostname = 1;
+}
+
+message PowerOnMachineResponse {
+  // Empty response - errors are returned via gRPC status codes
+}
+
+// GetHypervisorsInLocation
+message GetHypervisorsInLocationRequest {
+  common.MatchTags hypervisor_tags_to_match = 1;
+  bool include_unhealthy = 2;
+  bool include_vms = 3;
+  string location = 4;
+  string subnet_id = 5;
+}
+
+message GetHypervisorsInLocationResponse {
+  repeated Hypervisor hypervisors = 1;
+}
+
+// GetIpInfo
+message GetIpInfoRequest {
+  bytes ip_address = 1;  // net.IP is []byte
+}
+
+message GetIpInfoResponse {
+  string hypervisor_address = 1;  // host:port
+  hypervisor.VmInfo vm = 2;
+}
+
+// MoveIpAddresses
+message MoveIpAddressesRequest {
+  string hypervisor_hostname = 1;
+  repeated bytes ip_addresses = 2;  // net.IP is []byte
+}
+
+message MoveIpAddressesResponse {
+  // Empty response - errors are returned via gRPC status codes
+}
+
+// Supporting types
+
+// Hypervisor represents a hypervisor with its allocated resources and VMs.
+message Hypervisor {
+  uint64 allocated_milli_cpus = 1;
+  uint64 allocated_memory = 2;  // MiB
+  uint64 allocated_volume_bytes = 3;
+  Machine machine = 4;
+  repeated hypervisor.VmInfo vms = 5;
+}
+
+// Machine represents a physical or virtual machine in the fleet.
+message Machine {
+  string gateway_subnet_id = 1;
+  NetworkEntry ipmi = 2;
+  string location = 3;
+  uint64 memory_in_mib = 4;
+  NetworkEntry network_entry = 5;
+  uint32 num_cpus = 6;
+  repeated string owner_groups = 7;
+  repeated string owner_users = 8;
+  repeated NetworkEntry secondary_network_entries = 9;
+  common.Tags tags = 10;
+  uint64 total_volume_bytes = 11;
+  string hostname = 12;
+}
+
+// NetworkEntry represents a network interface configuration.
+// Note: This is fleetmanager-specific. Hypervisor has its own NetworkEntry definition.
+message NetworkEntry {
+  string hostname = 1;
+  bytes host_ip_address = 2;
+  bytes host_mac_address = 3;
+  string subnet_id = 4;
+  bool vlan_trunk = 5;
+}
+
+// Note: VmInfo and Subnet are now imported from hypervisor.proto
+// to avoid duplication and ensure type consistency.

@@ -283,6 +283,17 @@ func (m *Manager) CreateVm(conn *srpc.Conn) error {
 	return m.createVm(conn)
 }
 
+// CreateVmAsync creates a VM asynchronously and returns immediately with the
+// VM info in StateStarting or StateStopped (if DoNotStart=true). The actual
+// VM creation (image fetching, volume setup, starting) happens in a background
+// goroutine. Clients should use GetVmInfo or GetUpdates to monitor progress.
+// This follows the AWS EC2 RunInstances pattern: returns immediately with state="pending".
+// Only supports ImageName and ImageURL modes (no ImageDataSize streaming).
+func (m *Manager) CreateVmAsync(request proto.CreateVmRequest,
+	authInfo *srpc.AuthInformation) (*proto.VmInfo, error) {
+	return m.createVmAsync(request, authInfo)
+}
+
 func (m *Manager) DebugVmImage(conn *srpc.Conn,
 	authInfo *srpc.AuthInformation) error {
 	return m.debugVmImage(conn, authInfo)
@@ -296,6 +307,16 @@ func (m *Manager) DeleteVmVolume(ipAddr net.IP, authInfo *srpc.AuthInformation,
 func (m *Manager) DestroyVm(ipAddr net.IP,
 	authInfo *srpc.AuthInformation, accessToken []byte) error {
 	return m.destroyVm(ipAddr, authInfo, accessToken)
+}
+
+// DestroyVmAsync destroys a VM asynchronously and returns immediately with the
+// VM info in StateDestroying. The actual destruction (file deletion, cleanup)
+// happens in a background goroutine. Clients should use GetVmInfo or GetUpdates
+// to monitor when the VM is fully deleted (disappears from VM list).
+// This follows the AWS EC2 pattern: returns immediately with state="terminating".
+func (m *Manager) DestroyVmAsync(ipAddr net.IP,
+	authInfo *srpc.AuthInformation, accessToken []byte) (*proto.VmInfo, error) {
+	return m.destroyVmAsync(ipAddr, authInfo, accessToken)
 }
 
 func (m *Manager) DiscardVmAccessToken(ipAddr net.IP,
@@ -597,6 +618,16 @@ func (m *Manager) StartVm(ipAddr net.IP, authInfo *srpc.AuthInformation,
 	accessToken []byte, dhcpTimeout time.Duration) (
 	bool, error) {
 	return m.startVm(ipAddr, authInfo, accessToken, dhcpTimeout)
+}
+
+// StartVmAsync starts a VM asynchronously and returns immediately with the VM
+// info in StateStarting. The VM will transition to StateRunning or
+// StateFailedToStart asynchronously. Clients should use GetVmInfo or GetUpdates
+// to monitor the state transition.
+// This follows the AWS EC2 pattern: returns immediately with state="starting".
+func (m *Manager) StartVmAsync(ipAddr net.IP, authInfo *srpc.AuthInformation,
+	accessToken []byte, dhcpTimeout time.Duration) (*proto.VmInfo, error) {
+	return m.startVmAsync(ipAddr, authInfo, accessToken, dhcpTimeout)
 }
 
 func (m *Manager) StopVm(ipAddr net.IP, authInfo *srpc.AuthInformation,

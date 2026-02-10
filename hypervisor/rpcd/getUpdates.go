@@ -3,10 +3,12 @@ package rpcd
 import (
 	"fmt"
 	"io"
+	"net"
 	"time"
 
 	"github.com/Cloud-Foundations/Dominator/lib/srpc"
 	proto "github.com/Cloud-Foundations/Dominator/proto/hypervisor"
+	pb "github.com/Cloud-Foundations/Dominator/proto/hypervisor/grpc"
 )
 
 const (
@@ -122,4 +124,45 @@ func (t *srpcType) getUpdatesReader(decoder srpc.Decoder,
 		}
 	}()
 	return closeChannel, responseChannel
+}
+
+// gRPC handler - streaming watch pattern
+func (s *grpcServer) GetUpdates(req *pb.GetUpdatesRequest,
+	stream pb.Hypervisor_GetUpdatesServer) error {
+	// Create update channel from manager
+	updateChannel := s.manager.MakeUpdateChannel()
+	defer s.manager.CloseUpdateChannel(updateChannel)
+
+	// Stream updates until context is cancelled
+	for {
+		select {
+		case update, ok := <-updateChannel:
+			if !ok {
+				return fmt.Errorf("update channel closed")
+			}
+
+			// Convert SRPC Update to gRPC Update
+			// The gRPC Update is simpler - just contains IP addresses of changed VMs
+			pbUpdate := &pb.Update{}
+			if update.HaveVMs {
+				for ipStr := range update.VMs {
+					ipAddr := net.ParseIP(ipStr)
+					if shrunkIP := ipAddr.To4(); shrunkIP != nil {
+						ipAddr = shrunkIP
+					}
+					pbUpdate.IpAddresses = append(pbUpdate.IpAddresses, []byte(ipAddr))
+				}
+			}
+
+			// Send update to client
+			if err := stream.Send(pbUpdate); err != nil {
+				return fmt.Errorf("error sending update: %w", err)
+			}
+
+		case <-stream.Context().Done():
+			// Client cancelled the stream
+			s.logger.Debugf(0, "update client disconnected\n")
+			return nil
+		}
+	}
 }

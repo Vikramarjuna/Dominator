@@ -1,0 +1,443 @@
+syntax = "proto3";
+
+package hypervisor;
+
+import "common/grpc/common.proto";
+
+option go_package = "github.com/Cloud-Foundations/Dominator/proto/hypervisor/grpc;hypervisor_grpc";
+
+// Hypervisor service - manages virtual machines on a hypervisor host.
+service Hypervisor {
+  // VM Information
+  rpc GetVmInfo(GetVmInfoRequest) returns (GetVmInfoResponse) {}
+  rpc GetVmInfos(GetVmInfosRequest) returns (GetVmInfosResponse) {}
+  rpc ListVMs(ListVMsRequest) returns (ListVMsResponse) {}
+
+  // VM Lifecycle
+  // CreateVm - Bidirectional streaming for ImageDataSize mode
+  // Client streams: metadata + image data + user data + secondary volumes
+  // Server streams: progress updates, then final response
+  // Supports all modes: ImageName, ImageURL, and ImageDataSize
+  // TODO: Not yet implemented - returns Unimplemented error
+  rpc CreateVm(stream CreateVmRequest) returns (stream CreateVmResponse) {}
+
+  // CreateVmAsync - Asynchronous/non-blocking (AWS EC2 pattern)
+  // Returns immediately with VM in StateStarting or StateStopped (if DoNotStart=true)
+  // Supports ImageName and ImageURL modes only (no ImageDataSize streaming)
+  //
+  // Design Note: We use separate APIs for different use cases:
+  // - CreateVmAsync: Simple async for ImageName/ImageURL (90% of use cases)
+  // - CreateVm: Bidirectional streaming for ImageDataSize (rare custom image uploads)
+  // This keeps APIs clean and purpose-specific rather than one complex API.
+  rpc CreateVmAsync(CreateVmAsyncRequest) returns (CreateVmAsyncResponse) {}
+
+  // StartVm - Synchronous/blocking (SRPC-compatible)
+  // Blocks until VM starts and DHCP completes (or times out)
+  rpc StartVm(StartVmRequest) returns (StartVmResponse) {}
+
+  // StartVmAsync - Asynchronous/non-blocking (AWS EC2 pattern)
+  // Returns immediately with VM in StateStarting
+  rpc StartVmAsync(StartVmAsyncRequest) returns (StartVmAsyncResponse) {}
+
+  rpc StopVm(StopVmRequest) returns (StopVmResponse) {}
+  rpc RebootVm(RebootVmRequest) returns (RebootVmResponse) {}
+
+  // DestroyVm - Synchronous/blocking (SRPC-compatible)
+  // Blocks until VM is fully destroyed and files are deleted
+  rpc DestroyVm(DestroyVmRequest) returns (DestroyVmResponse) {}
+
+  // DestroyVmAsync - Asynchronous/non-blocking (AWS EC2 pattern)
+  // Returns immediately with VM in StateDestroying
+  rpc DestroyVmAsync(DestroyVmAsyncRequest) returns (DestroyVmAsyncResponse) {}
+
+  // Subnet Management
+  rpc ListSubnets(ListSubnetsRequest) returns (ListSubnetsResponse) {}
+
+  // Real-time Updates (watch pattern)
+  rpc GetUpdates(GetUpdatesRequest) returns (stream Update) {}
+
+  // VM Configuration Changes
+  rpc ChangeVmTags(ChangeVmTagsRequest) returns (ChangeVmTagsResponse) {}
+  rpc ChangeVmOwnerUsers(ChangeVmOwnerUsersRequest) returns (ChangeVmOwnerUsersResponse) {}
+  rpc ChangeVmSize(ChangeVmSizeRequest) returns (ChangeVmSizeResponse) {}
+
+  // Capacity and Status
+  rpc GetCapacity(GetCapacityRequest) returns (GetCapacityResponse) {}
+}
+
+// Shared types used by both hypervisor and fleetmanager services
+
+// Address represents a network address (IP + MAC).
+message Address {
+  bytes ip_address = 1;   // net.IP
+  string mac_address = 2;
+}
+
+// NetworkEntry represents a network interface configuration.
+message NetworkEntry {
+  string hostname = 1;
+  bytes host_ip_address = 2;   // net.IP
+  bytes host_mac_address = 3;  // net.HardwareAddr
+  string subnet_id = 4;
+  bool vlan_trunk = 5;
+}
+
+// Subnet represents a network subnet configuration.
+message Subnet {
+  string id = 1;
+  bytes ip_gateway = 2;              // net.IP
+  bytes ip_mask = 3;                 // net.IPMask
+  string domain_name = 4;
+  repeated bytes domain_name_servers = 5;  // []net.IP
+  bool disable_metadata = 6;
+  bool manage = 7;
+  uint32 vlan_id = 8;
+  repeated string allowed_groups = 9;
+  repeated string allowed_users = 10;
+  bytes first_dynamic_ip = 11;       // net.IP
+  bytes last_dynamic_ip = 12;        // net.IP
+  common.Tags tags = 13;
+}
+
+// VmInfo contains virtual machine information.
+// This is the complete VM information structure used by hypervisor.
+// FleetManager uses a subset of these fields.
+message VmInfo {
+  Address address = 1;
+  int64 changed_state_on = 2;        // Unix timestamp (time.Time)
+  uint32 console_type = 3;           // ConsoleType enum
+  int64 created_on = 4;              // Unix timestamp (time.Time)
+  int32 cpu_priority = 5;
+  bool destroy_on_powerdown = 6;
+  bool destroy_protection = 7;
+  bool disable_virt_io = 8;
+  string extra_kernel_options = 9;
+  uint32 firmware_type = 10;         // FirmwareType enum
+  string hostname = 11;
+  int64 identity_expires = 12;       // Unix timestamp (time.Time)
+  string identity_name = 13;
+  string image_name = 14;
+  string image_url = 15;
+  uint32 machine_type = 16;          // MachineType enum
+  uint64 memory_in_mib = 17;
+  uint32 milli_cpus = 18;
+  repeated NetworkEntry network_entries = 19;
+  repeated string owner_groups = 20;
+  repeated string owner_users = 21;
+  string root_file_system_label = 22;
+  bool spread_volumes = 23;
+  uint32 state = 24;                 // State enum
+  repeated Address secondary_addresses = 25;
+  repeated string secondary_subnet_ids = 26;
+  string subnet_id = 27;
+  common.Tags tags = 28;
+  bool uncommitted = 29;
+  uint32 virtual_cpus = 30;
+  repeated Volume volumes = 31;
+  uint32 watchdog_action = 32;       // WatchdogAction enum
+  uint32 watchdog_model = 33;        // WatchdogModel enum
+  bytes ip_address = 34;             // net.IP - for convenience (same as address.ip_address)
+}
+
+// Volume represents a VM storage volume.
+message Volume {
+  uint32 format = 1;                 // VolumeFormat enum
+  uint32 interface = 2;              // VolumeInterface enum
+  uint64 size = 3;
+  map<string, uint64> snapshots = 4;
+  uint32 type = 5;                   // VolumeType enum
+  uint64 virtual_size = 6;
+}
+
+// RPC Messages
+
+// GetVmInfo
+message GetVmInfoRequest {
+  bytes ip_address = 1;  // net.IP
+}
+
+message GetVmInfoResponse {
+  VmInfo vm_info = 1;
+}
+
+// GetVmInfos
+message GetVmInfosRequest {
+  uint64 ignore_state_mask = 1;
+  repeated string owner_groups = 2;
+  repeated string owner_users = 3;
+  common.MatchTags vm_tags_to_match = 4;  // Empty: match all tags
+}
+
+message GetVmInfosResponse {
+  repeated VmInfo vm_infos = 1;
+}
+
+// ListVMs
+message ListVMsRequest {
+  uint64 ignore_state_mask = 1;
+  repeated string owner_groups = 2;
+  repeated string owner_users = 3;
+  bool sort = 4;
+  common.MatchTags vm_tags_to_match = 5;  // Empty: match all tags
+}
+
+message ListVMsResponse {
+  repeated bytes ip_addresses = 1;  // []net.IP
+}
+
+// CreateVm - Bidirectional streaming (TODO: Not yet implemented)
+message CreateVmRequest {
+  oneof payload {
+    CreateVmMetadata metadata = 1;  // First message from client
+    bytes data_chunk = 2;            // Subsequent messages from client
+  }
+}
+
+message CreateVmMetadata {
+  // VM configuration (from VmInfo)
+  uint32 console_type = 1;
+  int32 cpu_priority = 2;
+  bool destroy_on_powerdown = 3;
+  bool destroy_protection = 4;
+  bool disable_virt_io = 5;
+  string extra_kernel_options = 6;
+  uint32 firmware_type = 7;
+  string hostname = 8;
+  string image_name = 9;
+  string image_url = 10;
+  uint32 machine_type = 11;
+  uint64 memory_in_mib = 12;
+  uint32 milli_cpus = 13;
+  repeated NetworkEntry network_entries = 14;
+  repeated string owner_groups = 15;
+  repeated string owner_users = 16;
+  bool spread_volumes = 17;
+  repeated Address secondary_addresses = 18;
+  repeated string secondary_subnet_ids = 19;
+  string subnet_id = 20;
+  common.Tags tags = 21;
+  uint32 virtual_cpus = 22;
+  repeated Volume volumes = 23;
+  uint32 watchdog_action = 24;
+  uint32 watchdog_model = 25;
+
+  // CreateVm-specific fields
+  int64 dhcp_timeout_ns = 26;  // time.Duration in nanoseconds
+  bool do_not_start = 27;
+  bool enable_netboot = 28;
+  bytes identity_certificate = 29;  // PEM encoded
+  bytes identity_key = 30;  // PEM encoded
+  uint64 image_data_size = 31;  // If >0, client will stream image data
+  int64 image_timeout_ns = 32;  // time.Duration in nanoseconds
+  uint64 minimum_free_bytes = 33;
+  repeated string overlay_directories = 34;
+  map<string, bytes> overlay_files = 35;
+  uint64 roundup_power = 36;
+  repeated Volume secondary_volumes = 37;
+  bool secondary_volumes_data = 38;  // If true, client will stream volume data
+  repeated VolumeInitialisationInfo secondary_volumes_init = 39;
+  bool skip_bootloader = 40;
+  bool skip_memory_check = 41;
+  repeated uint32 storage_indices = 42;
+  uint64 user_data_size = 43;  // If >0, client will stream user data
+}
+
+message CreateVmResponse {
+  oneof payload {
+    string progress_message = 1;  // Progress updates from server
+    CreateVmResult result = 2;     // Final response from server
+  }
+}
+
+message CreateVmResult {
+  bytes ip_address = 1;  // net.IP
+  bool dhcp_timed_out = 2;
+}
+
+// CreateVmAsync - Asynchronous/non-blocking
+// Supports ImageName and ImageURL modes only
+message CreateVmAsyncRequest {
+  // VM configuration (from VmInfo)
+  uint32 console_type = 1;
+  int32 cpu_priority = 2;
+  bool destroy_on_powerdown = 3;
+  bool destroy_protection = 4;
+  bool disable_virt_io = 5;
+  string extra_kernel_options = 6;
+  uint32 firmware_type = 7;
+  string hostname = 8;
+  string image_name = 9;
+  string image_url = 10;
+  uint32 machine_type = 11;
+  uint64 memory_in_mib = 12;
+  uint32 milli_cpus = 13;
+  repeated NetworkEntry network_entries = 14;
+  repeated string owner_groups = 15;
+  repeated string owner_users = 16;
+  bool spread_volumes = 17;
+  repeated Address secondary_addresses = 18;
+  repeated string secondary_subnet_ids = 19;
+  string subnet_id = 20;
+  common.Tags tags = 21;
+  uint32 virtual_cpus = 22;
+  repeated Volume volumes = 23;
+  uint32 watchdog_action = 24;
+  uint32 watchdog_model = 25;
+
+  // CreateVm-specific fields
+  int64 dhcp_timeout_ns = 26;  // time.Duration in nanoseconds
+  bool do_not_start = 27;
+  bool enable_netboot = 28;
+  bytes identity_certificate = 29;  // PEM encoded
+  bytes identity_key = 30;  // PEM encoded
+  int64 image_timeout_ns = 31;  // time.Duration in nanoseconds
+  uint64 minimum_free_bytes = 32;
+  repeated string overlay_directories = 33;
+  map<string, bytes> overlay_files = 34;
+  uint64 roundup_power = 35;
+  repeated Volume secondary_volumes = 36;
+  repeated VolumeInitialisationInfo secondary_volumes_init = 37;
+  bool skip_bootloader = 38;
+  bool skip_memory_check = 39;
+  repeated uint32 storage_indices = 40;
+}
+
+message VolumeInitialisationInfo {
+  uint64 bytes_per_inode = 1;
+  string label = 2;
+  uint32 reserved_blocks_percentage = 3;
+}
+
+message CreateVmAsyncResponse {
+  VmInfo vm_info = 1;  // VM info with state=StateStarting or StateStopped
+}
+
+// StartVm - Synchronous/blocking (SRPC-compatible)
+// Blocks until VM starts and DHCP completes (or times out).
+// Use this for compatibility with existing SRPC clients.
+message StartVmRequest {
+  bytes ip_address = 1;  // net.IP
+  bytes access_token = 2;
+  int64 dhcp_timeout_ns = 3;  // time.Duration in nanoseconds
+}
+
+message StartVmResponse {
+  bool dhcp_timed_out = 1;  // true if DHCP ACK timed out
+}
+
+// StartVmAsync - Asynchronous/non-blocking (AWS EC2 pattern)
+// Returns immediately with VM in StateStarting. Clients should use GetVmInfo
+// or GetUpdates to monitor state transitions to StateRunning or StateFailedToStart.
+message StartVmAsyncRequest {
+  bytes ip_address = 1;  // net.IP
+  bytes access_token = 2;
+  int64 dhcp_timeout_ns = 3;  // time.Duration in nanoseconds
+}
+
+message StartVmAsyncResponse {
+  VmInfo vm_info = 1;  // VM info with state=StateStarting
+}
+
+// StopVm
+message StopVmRequest {
+  bytes ip_address = 1;  // net.IP
+  bytes access_token = 2;
+}
+
+message StopVmResponse {
+  // Empty - errors returned via gRPC status
+}
+
+// RebootVm
+message RebootVmRequest {
+  bytes ip_address = 1;  // net.IP
+  int64 dhcp_timeout_ns = 2;  // time.Duration in nanoseconds
+}
+
+message RebootVmResponse {
+  bool dhcp_timed_out = 1;
+}
+
+// DestroyVm - Synchronous/blocking (SRPC-compatible)
+message DestroyVmRequest {
+  bytes ip_address = 1;  // net.IP
+  bytes access_token = 2;
+}
+
+message DestroyVmResponse {
+  // Empty - errors returned via gRPC status
+}
+
+// DestroyVmAsync - Asynchronous/non-blocking (AWS EC2 pattern)
+message DestroyVmAsyncRequest {
+  bytes ip_address = 1;  // net.IP
+  bytes access_token = 2;
+}
+
+message DestroyVmAsyncResponse {
+  VmInfo vm_info = 1;  // VM info with state=StateDestroying
+}
+
+// ListSubnets
+message ListSubnetsRequest {
+  bool sort = 1;
+}
+
+message ListSubnetsResponse {
+  repeated Subnet subnets = 1;
+}
+
+// GetUpdates - streaming watch pattern
+message GetUpdatesRequest {
+  // Empty - streams all updates until client cancels context
+}
+
+message Update {
+  repeated bytes ip_addresses = 1;  // []net.IP - VMs that changed
+}
+
+// ChangeVmTags
+message ChangeVmTagsRequest {
+  bytes ip_address = 1;  // net.IP
+  common.Tags tags = 2;
+}
+
+message ChangeVmTagsResponse {
+  // Empty - errors returned via gRPC status
+}
+
+// ChangeVmOwnerUsers
+message ChangeVmOwnerUsersRequest {
+  bytes ip_address = 1;  // net.IP
+  repeated string owner_users = 2;
+}
+
+message ChangeVmOwnerUsersResponse {
+  // Empty - errors returned via gRPC status
+}
+
+// ChangeVmSize
+message ChangeVmSizeRequest {
+  bytes ip_address = 1;  // net.IP
+  uint64 memory_in_mib = 2;
+  uint32 milli_cpus = 3;
+  uint32 virtual_cpus = 4;
+}
+
+message ChangeVmSizeResponse {
+  // Empty - errors returned via gRPC status
+}
+
+// GetCapacity
+message GetCapacityRequest {
+  // Empty - gets capacity for this hypervisor
+}
+
+message GetCapacityResponse {
+  uint64 total_memory_in_mib = 1;
+  uint64 available_memory_in_mib = 2;
+  uint32 total_num_cpus = 3;
+  uint64 total_volume_bytes = 4;
+  uint64 available_volume_bytes = 5;
+}
+

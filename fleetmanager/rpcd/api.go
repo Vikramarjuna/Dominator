@@ -3,10 +3,13 @@ package rpcd
 import (
 	"io"
 
+	"google.golang.org/grpc"
+
 	"github.com/Cloud-Foundations/Dominator/fleetmanager/hypervisors"
 	"github.com/Cloud-Foundations/Dominator/lib/log"
 	"github.com/Cloud-Foundations/Dominator/lib/srpc"
 	"github.com/Cloud-Foundations/Dominator/lib/srpc/serverutil"
+	pb "github.com/Cloud-Foundations/Dominator/proto/fleetmanager/grpc"
 )
 
 type srpcType struct {
@@ -15,12 +18,20 @@ type srpcType struct {
 	*serverutil.PerUserMethodLimiter
 }
 
+// grpcServer implements the FleetManager gRPC service.
+type grpcServer struct {
+	pb.UnimplementedFleetManagerServer
+	hypervisorsManager *hypervisors.Manager
+	logger             log.DebugLogger
+}
+
 type htmlWriter srpcType
 
 func (hw *htmlWriter) WriteHtml(writer io.Writer) {
 	hw.writeHtml(writer)
 }
 
+// Setup registers the FleetManager SRPC service.
 func Setup(hypervisorsManager *hypervisors.Manager, logger log.DebugLogger) (
 	*htmlWriter, error) {
 	srpcObj := &srpcType{
@@ -47,4 +58,14 @@ func Setup(hypervisorsManager *hypervisors.Manager, logger log.DebugLogger) (
 				"PowerOnMachine",
 			}})
 	return (*htmlWriter)(srpcObj), nil
+}
+
+// SetupGRPC registers the FleetManager gRPC service with the given gRPC server.
+func SetupGRPC(server *grpc.Server, manager *hypervisors.Manager,
+	logger log.DebugLogger) {
+
+	pb.RegisterFleetManagerServer(server, &grpcServer{
+		hypervisorsManager: manager,
+		logger:             logger,
+	})
 }

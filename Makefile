@@ -64,6 +64,18 @@ subd.tarball:
 		-C $(ETCDIR) ssl
 
 
+install-grpc-tools:
+	@echo "Installing gRPC code generation tools..."
+	@go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+	@go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+	@go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest
+	@echo "✓ All tools installed to $(HOME)/go/bin"
+	@echo ""
+	@echo "Note: Make sure $(HOME)/go/bin is in your PATH"
+
+generate-grpc:
+	@./scripts/generate-grpc.sh
+
 format:
 	gofmt -s -w .
 

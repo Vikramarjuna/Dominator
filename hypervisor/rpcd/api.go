@@ -9,6 +9,8 @@ import (
 	"github.com/Cloud-Foundations/Dominator/lib/log"
 	"github.com/Cloud-Foundations/Dominator/lib/srpc"
 	proto "github.com/Cloud-Foundations/Dominator/proto/hypervisor"
+	pb "github.com/Cloud-Foundations/Dominator/proto/hypervisor/grpc"
+	"google.golang.org/grpc"
 )
 
 type DhcpServer interface {
@@ -36,6 +38,14 @@ type srpcType struct {
 type TftpbootServer interface {
 	RegisterFiles(ipAddr net.IP, files map[string][]byte)
 	UnregisterFiles(ipAddr net.IP)
+}
+
+type grpcServer struct {
+	pb.UnimplementedHypervisorServer
+	dhcpServer     DhcpServer
+	logger         log.DebugLogger
+	manager        *manager.Manager
+	tftpbootServer TftpbootServer
 }
 
 type htmlWriter srpcType
@@ -126,4 +136,16 @@ func Setup(manager *manager.Manager, dhcpServer DhcpServer,
 			"TraceVmMetadata",
 		}})
 	return (*htmlWriter)(srpcObj), nil
+}
+
+// SetupGRPC registers the gRPC Hypervisor service.
+func SetupGRPC(server *grpc.Server, manager *manager.Manager,
+	dhcpServer DhcpServer, tftpbootServer TftpbootServer,
+	logger log.DebugLogger) {
+	pb.RegisterHypervisorServer(server, &grpcServer{
+		dhcpServer:     dhcpServer,
+		logger:         logger,
+		manager:        manager,
+		tftpbootServer: tftpbootServer,
+	})
 }

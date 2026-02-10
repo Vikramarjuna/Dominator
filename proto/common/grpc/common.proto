@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package common;
+
+option go_package = "github.com/Cloud-Foundations/Dominator/proto/common/grpc;common_grpc";
+
+// Tags represents a set of key-value pairs for metadata.
+// This mirrors lib/tags.Tags (map[string]string).
+message Tags {
+  map<string, string> tags = 1;
+}
+
+// MatchTags represents tag matching criteria.
+// This mirrors lib/tags.MatchTags (map[string][]string).
+// Key: tag key, value: values to OR match.
+message MatchTags {
+  map<string, StringList> match_tags = 1;
+}
+
+// StringList is a helper message for MatchTags since proto3 doesn't support
+// map<string, repeated string> directly.
+message StringList {
+  repeated string values = 1;
+}
+

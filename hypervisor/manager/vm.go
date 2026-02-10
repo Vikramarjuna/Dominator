@@ -1839,6 +1839,390 @@ func (m *Manager) destroyVm(ipAddr net.IP, authInfo *srpc.AuthInformation,
 	return nil
 }
 
+// destroyVmAsync destroys a VM asynchronously and returns immediately with the
+// VM info in StateDestroying. The actual destruction (file deletion, cleanup)
+// happens in a background goroutine.
+func (m *Manager) destroyVmAsync(ipAddr net.IP, authInfo *srpc.AuthInformation,
+	accessToken []byte) (*proto.VmInfo, error) {
+	vm, err := m.getVmLockAndAuth(ipAddr, true, authInfo, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	switch vm.State {
+	case proto.StateStarting:
+		vm.mutex.Unlock()
+		return nil, errors.New("VM is starting")
+	case proto.StateRunning, proto.StateDebugging:
+		if vm.DestroyProtection {
+			vm.mutex.Unlock()
+			return nil, errors.New("cannot destroy running VM when protected")
+		}
+		vm.setState(proto.StateDestroying)
+		vm.commandInput <- "quit"
+		// Return immediately - VM will transition to StateStopped then be deleted
+		vmInfo := vm.VmInfo
+		vm.mutex.Unlock()
+		return &vmInfo, nil
+	case proto.StateStopping:
+		vm.mutex.Unlock()
+		return nil, errors.New("VM is stopping")
+	case proto.StateStopped, proto.StateFailedToStart, proto.StateMigrating,
+		proto.StateExporting, proto.StateCrashed:
+		vm.setState(proto.StateDestroying)
+		vmInfo := vm.VmInfo
+		// Launch async deletion - don't wait for file I/O
+		go func() {
+			vm.mutex.Lock()
+			vm.delete()
+			// delete() unlocks the mutex
+		}()
+		return &vmInfo, nil
+	case proto.StateDestroying:
+		vmInfo := vm.VmInfo
+		vm.mutex.Unlock()
+		return &vmInfo, nil // Already destroying, return current state
+	default:
+		vm.mutex.Unlock()
+		return nil, errors.New("unknown state: " + vm.State.String())
+	}
+}
+
+// createVmAsync creates a VM asynchronously and returns immediately with the
+// VM info in StateStarting or StateStopped (if DoNotStart=true). The actual
+// VM creation (image fetching, volume setup, starting) happens in a background
+// goroutine. Only supports ImageName and ImageURL modes (no streaming).
+func (m *Manager) createVmAsync(request proto.CreateVmRequest,
+	authInfo *srpc.AuthInformation) (*proto.VmInfo, error) {
+
+	username := authInfo.Username
+	m.Logger.Debugf(1, "CreateVmAsync(%s) starting\n", username)
+
+	// Validate that streaming modes are not used
+	if request.ImageDataSize > 0 {
+		return nil, errors.New("ImageDataSize not supported in CreateVmAsync")
+	}
+	if request.UserDataSize > 0 {
+		return nil, errors.New("UserDataSize not supported in CreateVmAsync")
+	}
+	if request.SecondaryVolumesData {
+		return nil, errors.New("SecondaryVolumesData not supported in CreateVmAsync")
+	}
+
+	// Validate that ImageName or ImageURL is provided
+	if request.ImageName == "" && request.ImageURL == "" && request.MinimumFreeBytes == 0 {
+		return nil, errors.New("must specify ImageName, ImageURL, or MinimumFreeBytes")
+	}
+
+	if m.disabled {
+		return nil, errors.New("Hypervisor is disabled")
+	}
+
+	// Set up owner users
+	ownerUsers := make([]string, 1, len(request.OwnerUsers)+1)
+	ownerUsers[0] = username
+	if ownerUsers[0] == "" {
+		return nil, errors.New("no authentication data")
+	}
+	ownerUsers = append(ownerUsers, request.OwnerUsers...)
+
+	// Validate identity certificate/key if provided
+	var identityExpires time.Time
+	var identityName string
+	if len(request.IdentityCertificate) > 0 && len(request.IdentityKey) > 0 {
+		var err error
+		var tlsCert *tls.Certificate
+		tlsCert, identityName, err = validateIdentityKeyPair(
+			request.IdentityCertificate, request.IdentityKey, ownerUsers[0])
+		if err != nil {
+			return nil, err
+		}
+		identityExpires = tlsCert.Leaf.NotAfter
+	}
+
+	// Allocate VM (this locks the manager and allocates resources)
+	vm, err := m.allocateVm(request, authInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set up VM fields
+	vm.IdentityExpires = identityExpires
+	vm.IdentityName = identityName
+	vm.OwnerUsers, vm.ownerUsers = stringutil.DeduplicateList(ownerUsers, false)
+
+	// Set initial state
+	if request.DoNotStart {
+		vm.setState(proto.StateStopped)
+	} else {
+		vm.setState(proto.StateStarting)
+	}
+
+	// Get VM info to return
+	vmInfo := vm.VmInfo
+
+	// Start VM creation in background goroutine
+	go m.createVmAsyncBackground(vm, request)
+
+	m.Logger.Debugf(1, "CreateVmAsync(%s) initiated, hostname=%s, IP=%s, state=%s\n",
+		username, vm.Hostname, vm.ipAddress, vm.State)
+
+	return &vmInfo, nil
+}
+
+// createVmAsyncBackground performs the actual VM creation in a background goroutine.
+// This function handles all the heavy lifting: creating directories, fetching images,
+// setting up volumes, and starting the VM.
+func (m *Manager) createVmAsyncBackground(vm *vmInfoType, request proto.CreateVmRequest) {
+	defer func() {
+		if r := recover(); r != nil {
+			m.Logger.Printf("CreateVmAsync background panic for %s: %v\n",
+				vm.ipAddress, r)
+			vm.mutex.Lock()
+			vm.setState(proto.StateFailedToStart)
+			vm.mutex.Unlock()
+		}
+	}()
+
+	// Cleanup function in case of failure
+	cleanup := func() {
+		vm.cleanup()
+	}
+	defer func() {
+		if cleanup != nil {
+			cleanup()
+		}
+	}()
+
+	// Check memory availability if needed
+	var memoryError <-chan error
+	if !request.SkipMemoryCheck {
+		memoryError = tryAllocateMemory(getVmInfoMemoryInMiB(request.VmInfo))
+	}
+
+	// Create VM directory
+	if err := os.Mkdir(vm.dirname, fsutil.DirPerms); err != nil {
+		m.Logger.Printf("CreateVmAsync(%s) failed to create directory: %s\n",
+			vm.ipAddress, err)
+		vm.mutex.Lock()
+		vm.setState(proto.StateFailedToStart)
+		vm.mutex.Unlock()
+		return
+	}
+
+	// Write identity key pair if provided
+	err := writeKeyPair(request.IdentityCertificate, request.IdentityKey,
+		filepath.Join(vm.dirname, IdentityRsaX509CertFile),
+		filepath.Join(vm.dirname, IdentityRsaX509KeyFile))
+	if err != nil {
+		m.Logger.Printf("CreateVmAsync(%s) failed to write key pair: %s\n",
+			vm.ipAddress, err)
+		vm.mutex.Lock()
+		vm.setState(proto.StateFailedToStart)
+		vm.mutex.Unlock()
+		return
+	}
+
+	// Determine root volume type
+	var rootVolumeType proto.VolumeType
+	if len(request.Volumes) > 0 {
+		rootVolumeType = request.Volumes[0].Type
+	}
+
+	// Handle different image modes
+	if request.ImageName != "" {
+		// Mode 1: Fetch image from image server
+		client, img, imageName, err := m.getImage(request.ImageName,
+			request.ImageTimeout)
+		if err != nil {
+			m.Logger.Printf("CreateVmAsync(%s) failed to get image: %s\n",
+				vm.ipAddress, err)
+			vm.mutex.Lock()
+			vm.setState(proto.StateFailedToStart)
+			vm.mutex.Unlock()
+			return
+		}
+		defer client.Close()
+		fs := img.FileSystem
+		vm.ImageName = imageName
+		size := computeSize(request.MinimumFreeBytes, request.RoundupPower,
+			fs.EstimateUsage(0))
+		err = vm.setupVolumes(size, rootVolumeType, request.SecondaryVolumes,
+			request.SpreadVolumes, request.StorageIndices)
+		if err != nil {
+			m.Logger.Printf("CreateVmAsync(%s) failed to setup volumes: %s\n",
+				vm.ipAddress, err)
+			vm.mutex.Lock()
+			vm.setState(proto.StateFailedToStart)
+			vm.mutex.Unlock()
+			return
+		}
+		writeRawOptions := util.WriteRawOptions{
+			ExtraKernelOptions: request.ExtraKernelOptions,
+			InitialImageName:   imageName,
+			MinimumFreeBytes:   request.MinimumFreeBytes,
+			OverlayDirectories: request.OverlayDirectories,
+			OverlayFiles:       request.OverlayFiles,
+			RootLabel:          vm.rootLabel(false),
+			RoundupPower:       request.RoundupPower,
+		}
+		err = m.writeRaw(vm.VolumeLocations[0], "", client, fs,
+			request.FirmwareType, writeRawOptions, request.SkipBootloader)
+		if err != nil {
+			m.Logger.Printf("CreateVmAsync(%s) failed to write image: %s\n",
+				vm.ipAddress, err)
+			vm.mutex.Lock()
+			vm.setState(proto.StateFailedToStart)
+			vm.mutex.Unlock()
+			return
+		}
+		if fi, err := os.Stat(vm.VolumeLocations[0].Filename); err != nil {
+			m.Logger.Printf("CreateVmAsync(%s) failed to stat volume: %s\n",
+				vm.ipAddress, err)
+			vm.mutex.Lock()
+			vm.setState(proto.StateFailedToStart)
+			vm.mutex.Unlock()
+			return
+		} else {
+			vm.Volumes = []proto.Volume{{Size: uint64(fi.Size())}}
+		}
+	} else if request.ImageURL != "" {
+		// Mode 2: Fetch image from HTTP URL
+		httpResponse, err := http.Get(request.ImageURL)
+		if err != nil {
+			m.Logger.Printf("CreateVmAsync(%s) failed to fetch image URL: %s\n",
+				vm.ipAddress, err)
+			vm.mutex.Lock()
+			vm.setState(proto.StateFailedToStart)
+			vm.mutex.Unlock()
+			return
+		}
+		defer httpResponse.Body.Close()
+		if httpResponse.StatusCode != http.StatusOK {
+			m.Logger.Printf("CreateVmAsync(%s) HTTP error: %s\n",
+				vm.ipAddress, httpResponse.Status)
+			vm.mutex.Lock()
+			vm.setState(proto.StateFailedToStart)
+			vm.mutex.Unlock()
+			return
+		}
+		if httpResponse.ContentLength < 0 {
+			m.Logger.Printf("CreateVmAsync(%s) no ContentLength from: %s\n",
+				vm.ipAddress, request.ImageURL)
+			vm.mutex.Lock()
+			vm.setState(proto.StateFailedToStart)
+			vm.mutex.Unlock()
+			return
+		}
+		err = vm.copyRootVolume(request, bufio.NewReader(httpResponse.Body),
+			uint64(httpResponse.ContentLength), rootVolumeType)
+		if err != nil {
+			m.Logger.Printf("CreateVmAsync(%s) failed to copy root volume: %s\n",
+				vm.ipAddress, err)
+			vm.mutex.Lock()
+			vm.setState(proto.StateFailedToStart)
+			vm.mutex.Unlock()
+			return
+		}
+	} else if request.MinimumFreeBytes > 0 {
+		// Mode 3: Just create empty volumes
+		err := vm.copyRootVolume(request, nil, request.MinimumFreeBytes,
+			rootVolumeType)
+		if err != nil {
+			m.Logger.Printf("CreateVmAsync(%s) failed to create empty volume: %s\n",
+				vm.ipAddress, err)
+			vm.mutex.Lock()
+			vm.setState(proto.StateFailedToStart)
+			vm.mutex.Unlock()
+			return
+		}
+	}
+
+	// Set volume interface and type
+	if len(request.Volumes) > 0 {
+		vm.Volumes[0].Interface = request.Volumes[0].Interface
+	}
+	vm.Volumes[0].Type = rootVolumeType
+
+	// Handle secondary volumes if needed
+	if len(request.SecondaryVolumes) > 0 {
+		for index, volume := range request.SecondaryVolumes {
+			fname := vm.VolumeLocations[index+1].Filename
+			err := copyData(fname, nil, volume.Size, vm.logger)
+			if err != nil {
+				m.Logger.Printf("CreateVmAsync(%s) failed to create secondary volume: %s\n",
+					vm.ipAddress, err)
+				vm.mutex.Lock()
+				vm.setState(proto.StateFailedToStart)
+				vm.mutex.Unlock()
+				return
+			}
+			if index < len(request.SecondaryVolumesInit) {
+				vinit := request.SecondaryVolumesInit[index]
+				err := util.MakeExt4fsWithParams(fname, util.MakeExt4fsParams{
+					NoDiscard:                true,
+					BytesPerInode:            vinit.BytesPerInode,
+					Label:                    vinit.Label,
+					ReservedBlocksPercentage: vinit.ReservedBlocksPercentage,
+				}, vm.logger)
+				if err != nil {
+					m.Logger.Printf("CreateVmAsync(%s) failed to format secondary volume: %s\n",
+						vm.ipAddress, err)
+					vm.mutex.Lock()
+					vm.setState(proto.StateFailedToStart)
+					vm.mutex.Unlock()
+					return
+				}
+			}
+		}
+		vm.Volumes = append(vm.Volumes, request.SecondaryVolumes...)
+	}
+
+	// Wait for memory allocation if needed
+	if memoryError != nil {
+		if err := <-memoryError; err != nil {
+			m.Logger.Printf("CreateVmAsync(%s) memory allocation failed: %s\n",
+				vm.ipAddress, err)
+			vm.mutex.Lock()
+			vm.setState(proto.StateFailedToStart)
+			vm.mutex.Unlock()
+			return
+		}
+	}
+
+	// Start the VM if requested
+	if !request.DoNotStart {
+		_, err := vm.startManaging(request.DhcpTimeout, request.EnableNetboot, false)
+		if err != nil {
+			m.Logger.Printf("CreateVmAsync(%s) failed to start VM: %s\n",
+				vm.ipAddress, err)
+			vm.mutex.Lock()
+			vm.setState(proto.StateFailedToStart)
+			vm.mutex.Unlock()
+			return
+		}
+	}
+
+	// Set up auto-destroy timer
+	vm.destroyTimer = time.AfterFunc(time.Second*15, vm.autoDestroy)
+
+	// Save create request for debugging
+	request.IdentityKey = nil
+	err = json.WriteToFile(filepath.Join(vm.dirname, "create-request.json"),
+		fsutil.PublicFilePerms, "    ", request)
+	if err != nil {
+		vm.logger.Println(err)
+	}
+
+	// Set up lock watcher
+	vm.setupLockWatcher()
+
+	// Success - don't cleanup
+	cleanup = nil
+
+	m.Logger.Debugf(1, "CreateVmAsync(%s) background completed successfully, IP=%s, state=%s\n",
+		vm.Hostname, vm.ipAddress, vm.State)
+}
+
 func (m *Manager) discardVmAccessToken(ipAddr net.IP,
 	authInfo *srpc.AuthInformation, accessToken []byte) error {
 	vm, err := m.getVmLockAndAuth(ipAddr, true, authInfo, accessToken)
@@ -3941,7 +4325,97 @@ func (m *Manager) startVm(ipAddr net.IP, authInfo *srpc.AuthInformation,
 		doUnlock = false
 		return vm.startManaging(dhcpTimeout, false, false)
 	default:
-		return false, errors.New("unknown state: " + vm.State.String())
+		return false, errors.New("VM is in unknown state: " +
+			vm.State.String())
+	}
+}
+
+// startVmAsync starts a VM asynchronously and returns immediately with the VM
+// info in StateStarting. The actual startup (volume checks, QEMU launch, DHCP
+// negotiation) happens in a background goroutine.
+// This follows the AWS EC2 pattern: returns immediately with state="starting".
+func (m *Manager) startVmAsync(ipAddr net.IP, authInfo *srpc.AuthInformation,
+	accessToken []byte, dhcpTimeout time.Duration) (*proto.VmInfo, error) {
+	if m.disabled {
+		return nil, errors.New("Hypervisor is disabled")
+	}
+	vm, err := m.getVmLockAndAuth(ipAddr, true, authInfo, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	defer vm.mutex.Unlock()
+	if err := checkAvailableMemory(vm.MemoryInMiB); err != nil {
+		return nil, err
+	}
+	switch vm.State {
+	case proto.StateStarting:
+		return nil, errors.New("VM is already starting")
+	case proto.StateRunning:
+		return nil, errors.New("VM is running")
+	case proto.StateStopping:
+		return nil, errors.New("VM is stopping")
+	case proto.StateStopped, proto.StateFailedToStart, proto.StateExporting,
+		proto.StateCrashed:
+		vm.setState(proto.StateStarting)
+		// Launch async - don't wait for volume checks, QEMU launch, or DHCP
+		go func() {
+			dhcpTimedOut, err := vm.startManaging(dhcpTimeout, false, false)
+			if err != nil {
+				vm.logger.Printf("Failed to start VM %s: %v",
+					ipAddr.String(), err)
+				// startManaging already sets state to StateFailedToStart on error
+			} else if dhcpTimedOut {
+				vm.logger.Printf("VM %s started but DHCP ACK timed out",
+					ipAddr.String())
+				// VM is running but DHCP timed out
+			}
+			// State is already set to StateRunning by startManaging if successful
+		}()
+		// Return immediately with current state (StateStarting)
+		vmInfo := vm.VmInfo
+		return &vmInfo, nil
+	case proto.StateDestroying:
+		return nil, errors.New("VM is destroying")
+	case proto.StateMigrating:
+		return nil, errors.New("VM is migrating")
+	case proto.StateDebugging:
+		debugRoot := vm.getDebugRoot()
+		if debugRoot == "" {
+			return nil, errors.New("debugging volume missing")
+		}
+		stoppedNotifier := make(chan struct{}, 1)
+		vm.stoppedNotifier = stoppedNotifier
+		vm.setState(proto.StateStopping)
+		vm.commandInput <- "system_powerdown"
+		time.AfterFunc(time.Second*15, vm.kill)
+		vm.mutex.Unlock()
+		<-stoppedNotifier
+		vm.mutex.Lock()
+		if vm.State != proto.StateStopped {
+			return nil, errors.New("VM is not stopped after stop attempt")
+		}
+		if err := os.Remove(debugRoot); err != nil {
+			return nil, err
+		}
+		vm.writeAndSendInfo()
+		vm.setState(proto.StateStarting)
+		// Launch async
+		go func() {
+			dhcpTimedOut, err := vm.startManaging(dhcpTimeout, false, false)
+			if err != nil {
+				vm.logger.Printf("Failed to start VM %s: %v",
+					ipAddr.String(), err)
+			} else if dhcpTimedOut {
+				vm.logger.Printf("VM %s started but DHCP ACK timed out",
+					ipAddr.String())
+			}
+		}()
+		// Return immediately with current state (StateStarting)
+		vmInfo := vm.VmInfo
+		return &vmInfo, nil
+	default:
+		return nil, errors.New("VM is in unknown state: " +
+			vm.State.String())
 	}
 }
 
