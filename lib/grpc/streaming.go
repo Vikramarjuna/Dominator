@@ -38,10 +38,9 @@ func NewStreamingConn(
 	encodeFunc func(v any) error,
 	opts ...StreamingConnOption,
 ) *StreamingConn {
-	conn := ConnFromContext(ctx)
 	streamConn := &StreamingConn{
 		ctx:        ctx,
-		authInfo:   conn.GetAuthInformation(),
+		authInfo:   AuthInfoFromContext(ctx).GetAuthInformation(),
 		decodeFunc: decodeFunc,
 		encodeFunc: encodeFunc,
 	}

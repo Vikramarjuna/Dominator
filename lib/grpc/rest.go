@@ -26,7 +26,7 @@ func NewRestAuthMiddleware(config RestAuthConfig) func(http.Handler) http.Handle
 			}
 
 			if _, ok := unauthenticatedMethods[fullMethod]; ok {
-				ctx := ContextWithConn(r.Context(), &Conn{})
+				ctx := ContextWithAuthInfo(r.Context(), &AuthInfo{})
 				recordRestCallStart()
 				next.ServeHTTP(w, r.WithContext(ctx))
 				recordRestCallEnd(fullMethod, startTime, nil)
@@ -38,43 +38,24 @@ func NewRestAuthMiddleware(config RestAuthConfig) func(http.Handler) http.Handle
 				http.Error(w, "client certificate required", http.StatusUnauthorized)
 				return
 			}
-			username, permittedMethods, groupList, err := srpc.GetAuth(*r.TLS)
+			_, isPublic := publicMethods[fullMethod]
+			authInformation, authorised, err := srpc.CheckTlsAuthorisation(
+				grpcToSrpcMethod(fullMethod), *r.TLS, true, isPublic)
 			if err != nil {
 				recordRestDeniedCall(fullMethod)
 				http.Error(w, "authentication failed: "+err.Error(), http.StatusUnauthorized)
 				return
 			}
-
-			authInfo := &srpc.AuthInformation{
-				Username:  username,
-				GroupList: groupList,
-			}
-			conn := &Conn{
-				authInfo:         authInfo,
-				permittedMethods: permittedMethods,
-			}
-			if !checkAuthorizationWithConn(fullMethod, conn) {
+			if !authorised {
+				recordRestDeniedCall(fullMethod)
 				http.Error(w, "permission denied: "+fullMethod, http.StatusForbidden)
 				return
 			}
-
-			ctx := ContextWithConn(r.Context(), conn)
+			ctx := ContextWithAuthInfo(r.Context(),
+				&AuthInfo{authInformation: authInformation})
 			recordRestCallStart()
 			next.ServeHTTP(w, r.WithContext(ctx))
 			recordRestCallEnd(fullMethod, startTime, nil)
 		})
 	}
-}
-
-func checkAuthorizationWithConn(fullMethod string, conn *Conn) bool {
-	_, isPublic := publicMethods[fullMethod]
-	srpcMethod := grpcToSrpcMethod(fullMethod)
-	authorized, haveMethodAccess := srpc.CheckAuthorization(srpcMethod, conn,
-		srpc.GetDefaultGrantMethod(), isPublic, false)
-	if !authorized {
-		recordRestDeniedCall(fullMethod)
-		return false
-	}
-	conn.authInfo.HaveMethodAccess = haveMethodAccess
-	return true
 }
