@@ -6,9 +6,12 @@ import (
 	"sync"
 
 	"github.com/Cloud-Foundations/Dominator/hypervisor/manager"
+	lib_grpc "github.com/Cloud-Foundations/Dominator/lib/grpc"
 	"github.com/Cloud-Foundations/Dominator/lib/log"
 	"github.com/Cloud-Foundations/Dominator/lib/srpc"
 	proto "github.com/Cloud-Foundations/Dominator/proto/hypervisor"
+	pb "github.com/Cloud-Foundations/Dominator/proto/hypervisor/grpc"
+	"google.golang.org/grpc"
 )
 
 type Config struct {
@@ -55,6 +58,14 @@ func (hw *htmlWriter) WriteHtml(writer io.Writer) {
 	hw.writeHtml(writer)
 }
 
+// grpcServer implements the gRPC HypervisorServer interface.
+type grpcServer struct {
+	dhcpServer     DhcpServer
+	logger         log.DebugLogger
+	manager        *manager.Manager
+	tftpbootServer TftpbootServer
+}
+
 func Setup(config Config, params Params) (*htmlWriter, error) {
 	srpcObj := &srpcType{
 		dhcpServer:     params.DhcpServer,
@@ -67,6 +78,31 @@ func Setup(config Config, params Params) (*htmlWriter, error) {
 		func(_ string, authInfo *srpc.AuthInformation) bool {
 			return params.Manager.CheckOwnership(authInfo)
 		})
+	srpc.RegisterNameWithOptions("Hypervisor", srpcObj,
+		getMethodOptions(config))
+	return (*htmlWriter)(srpcObj), nil
+}
+
+// SetupGRPC registers the Hypervisor gRPC service on server and returns it.
+func SetupGRPC(server *grpc.Server, config Config, params Params) pb.HypervisorServer {
+	methodOptions := getMethodOptions(config)
+	lib_grpc.RegisterServiceOptions("Hypervisor", lib_grpc.ServiceOptions{
+		PublicMethods:          methodOptions.PublicMethods,
+		UnauthenticatedMethods: methodOptions.UnauthenticatedMethods,
+	})
+	srv := &grpcServer{
+		dhcpServer:     params.DhcpServer,
+		logger:         params.Logger,
+		manager:        params.Manager,
+		tftpbootServer: params.TftpbootServer,
+	}
+	pb.RegisterHypervisorServer(server, srv)
+	return srv
+}
+
+// getMethodOptions returns the SRPC receiver options, which are also used to
+// register the gRPC service options.
+func getMethodOptions(config Config) srpc.ReceiverOptions {
 	publicMethods := []string{
 		"AcknowledgeVm",
 		"AddVmVolumes",
@@ -147,9 +183,8 @@ func Setup(config Config, params Params) (*htmlWriter, error) {
 			"ListVMs",
 		}
 	}
-	srpc.RegisterNameWithOptions("Hypervisor", srpcObj, srpc.ReceiverOptions{
+	return srpc.ReceiverOptions{
 		PublicMethods:          publicMethods,
 		UnauthenticatedMethods: unauthenticatedMethods,
-	})
-	return (*htmlWriter)(srpcObj), nil
+	}
 }

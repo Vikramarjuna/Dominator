@@ -283,7 +283,7 @@ func (m *Manager) CopyVm(conn *srpc.Conn, request proto.CopyVmRequest) error {
 	return m.copyVm(conn, request)
 }
 
-func (m *Manager) CreateVm(conn *srpc.Conn) error {
+func (m *Manager) CreateVm(conn srpc.StreamingConn) error {
 	return m.createVm(conn)
 }
 

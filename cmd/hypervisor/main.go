@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
@@ -10,6 +12,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"google.golang.org/grpc"
 
 	"github.com/Cloud-Foundations/Dominator/hypervisor/dhcpd"
 	"github.com/Cloud-Foundations/Dominator/hypervisor/httpd"
@@ -21,12 +26,15 @@ import (
 	"github.com/Cloud-Foundations/Dominator/lib/flags/commands"
 	"github.com/Cloud-Foundations/Dominator/lib/flags/loadflags"
 	"github.com/Cloud-Foundations/Dominator/lib/flagutil"
+	lib_grpc "github.com/Cloud-Foundations/Dominator/lib/grpc"
 	"github.com/Cloud-Foundations/Dominator/lib/log"
 	"github.com/Cloud-Foundations/Dominator/lib/log/serverlogger"
 	"github.com/Cloud-Foundations/Dominator/lib/net"
+	"github.com/Cloud-Foundations/Dominator/lib/server"
 	"github.com/Cloud-Foundations/Dominator/lib/srpc"
 	"github.com/Cloud-Foundations/Dominator/lib/srpc/setupserver"
 	"github.com/Cloud-Foundations/Dominator/lib/types"
+	pb "github.com/Cloud-Foundations/Dominator/proto/hypervisor/grpc"
 	"github.com/Cloud-Foundations/tricorder/go/tricorder"
 )
 
@@ -69,7 +77,7 @@ var (
 		"Directory to store object cache (default first volume directory parent)")
 	objectCacheSize = flagutil.Size(10 << 30)
 	portNum         = flag.Uint("portNum", constants.HypervisorPortNumber,
-		"Port number to allocate and listen on for HTTP/RPC")
+		"Port number to allocate and listen on for all services")
 	showVGA  = flag.Bool("showVGA", false, "If true, show VGA console")
 	stateDir = flag.String("stateDir", "/var/lib/hypervisor",
 		"Name of state directory")
@@ -116,6 +124,7 @@ var subcommands = []commands.Command{
 func processCommand(args []string) {
 	if len(args) < 1 {
 		runSubcommand(nil, nil)
+		return
 	}
 	os.Exit(commands.RunCommands(subcommands, printUsage, nil))
 }
@@ -143,6 +152,7 @@ func handleSignals(flusher Flusher, logger flushLogger) {
 }
 
 func run() {
+	fmt.Fprintln(os.Stderr, "DEBUG: run() starting")
 	if *testMemoryAvailable > 0 {
 		nBytes := *testMemoryAvailable << 20
 		mem := make([]byte, nBytes)
@@ -151,12 +161,16 @@ func run() {
 		}
 		os.Exit(0)
 	}
+	fmt.Fprintln(os.Stderr, "DEBUG: before tricorder.RegisterFlags()")
 	tricorder.RegisterFlags()
+	fmt.Fprintln(os.Stderr, "DEBUG: after tricorder.RegisterFlags()")
 	if os.Geteuid() != 0 {
 		fmt.Fprintln(os.Stderr, "Must run the Hypervisor as root")
 		os.Exit(1)
 	}
+	fmt.Fprintln(os.Stderr, "DEBUG: creating logger")
 	logger := serverlogger.New("")
+	fmt.Fprintln(os.Stderr, "DEBUG: logger created")
 	srpc.SetDefaultLogger(logger)
 	params := setupserver.Params{Logger: logger}
 	if err := setupserver.SetupTlsWithParams(params); err != nil {
@@ -243,20 +257,20 @@ func run() {
 		logger.Fatalf("Cannot listen for control: %s\n", err)
 	}
 	httpd.AddHtmlWriter(managerObj)
+	rpcConfig := rpcd.Config{
+		AllowUnauthenticatedReads: *allowUnauthenticatedReads,
+	}
+	rpcParams := rpcd.Params{
+		DhcpServer:     dhcpServer,
+		Logger:         logger,
+		Manager:        managerObj,
+		TftpbootServer: tftpbootServer,
+	}
 	if len(bridges) < 1 {
 		logger.Println("No bridges found: entering log-only mode")
 	} else {
 		httpd.AddHtmlWriter(dhcpServer)
-		rpcHtmlWriter, err := rpcd.Setup(
-			rpcd.Config{
-				AllowUnauthenticatedReads: *allowUnauthenticatedReads,
-			},
-			rpcd.Params{
-				DhcpServer:     dhcpServer,
-				Logger:         logger,
-				Manager:        managerObj,
-				TftpbootServer: tftpbootServer,
-			})
+		rpcHtmlWriter, err := rpcd.Setup(rpcConfig, rpcParams)
 		if err != nil {
 			logger.Fatalf("Cannot start rpcd: %s\n", err)
 		}
@@ -268,8 +282,26 @@ func run() {
 		logger.Fatalf("Cannot start metadata server: %s\n", err)
 	}
 	go handleSignals(managerObj, logger)
-	if err := httpd.StartServer(*portNum, managerObj, false); err != nil {
-		logger.Fatalf("Unable to create http server: %s\n", err)
+
+	// Start server (gRPC/REST + HTTP/SRPC on same port).
+	restMiddleware := lib_grpc.NewRestAuthMiddleware(lib_grpc.RestAuthConfig{
+		ServiceName:  "hypervisor.Hypervisor",
+		PathToMethod: rpcd.ExtractMethodFromPath,
+	})
+	config := server.Config{
+		Port:        *portNum,
+		Logger:      logger,
+		HttpHandler: httpd.NewHandler(managerObj),
+		GrpcHandler: func(grpcServer *grpc.Server, gatewayMux *runtime.ServeMux) (http.Handler, error) {
+			srv := rpcd.SetupGRPC(grpcServer, rpcConfig, rpcParams)
+			if err := pb.RegisterHypervisorHandlerServer(context.Background(), gatewayMux, srv); err != nil {
+				return nil, err
+			}
+			return restMiddleware(gatewayMux), nil
+		},
+	}
+	if err := server.Start(config); err != nil {
+		logger.Fatalf("Server failed: %s\n", err)
 	}
 }
 

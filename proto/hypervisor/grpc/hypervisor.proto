@@ -1,0 +1,202 @@
+syntax = "proto3";
+
+package hypervisor;
+
+option go_package = "github.com/Cloud-Foundations/Dominator/proto/hypervisor/grpc";
+
+import "google/api/annotations.proto";
+// Note: Field behaviors (OUTPUT_ONLY, INPUT_ONLY, REQUIRED) are documented in comments.
+// google/api/field_behavior.proto could be added for formal annotations.
+
+// Hypervisor service
+service Hypervisor {
+  // GetHealth returns the health status of the hypervisor.
+  // This is an unauthenticated endpoint for load balancer health checks.
+  rpc GetHealth(GetHealthRequest) returns (GetHealthResponse) {
+    option (google.api.http) = {
+      get: "/v1/health"
+    };
+  }
+
+  // CreateVm creates a VM asynchronously (non-blocking)
+  // Returns immediately with VM in starting state
+  // Client polls GetVm to check completion
+  rpc CreateVm(CreateVmRequest) returns (Vm) {
+    option (google.api.http) = {
+      post: "/v1/vms"
+      body: "vm"
+    };
+  }
+
+  // CreateVmStreaming creates a VM with bidirectional streaming (blocking)
+  // Client sends: initial request, then optionally streams image data
+  // Server sends: multiple progress messages until VM is fully created
+  rpc CreateVmStreaming(stream CreateVmStreamingRequest) returns (stream CreateVmStreamingResponse);
+
+  // StartVm starts a stopped VM
+  rpc StartVm(StartVmRequest) returns (Vm) {
+    option (google.api.http) = {
+      post: "/v1/vms/{ip_address}:start"
+    };
+  }
+
+  // DestroyVm destroys a VM
+  rpc DestroyVm(DestroyVmRequest) returns (DestroyVmResponse) {
+    option (google.api.http) = {
+      delete: "/v1/vms/{ip_address}"
+    };
+  }
+
+  // ListVms lists all VMs on the hypervisor
+  rpc ListVms(ListVmsRequest) returns (ListVmsResponse) {
+    option (google.api.http) = {
+      get: "/v1/vms"
+    };
+  }
+
+  // GetVm gets information about a specific VM
+  rpc GetVm(GetVmRequest) returns (Vm) {
+    option (google.api.http) = {
+      get: "/v1/vms/{ip_address}"
+    };
+  }
+}
+
+// VmState represents the current state of a VM
+enum VmState {
+  VM_STATE_UNSPECIFIED = 0;
+  VM_STATE_STARTING = 1;
+  VM_STATE_RUNNING = 2;
+  VM_STATE_FAILED_TO_START = 3;
+  VM_STATE_STOPPING = 4;
+  VM_STATE_STOPPED = 5;
+  VM_STATE_MIGRATING = 6;
+  VM_STATE_EXPORTING = 7;
+  VM_STATE_CRASHED = 8;
+  VM_STATE_DESTROYING = 9;
+  VM_STATE_DEBUGGING = 10;
+}
+
+// VmView controls how much detail is returned for VM resources
+// TODO: Can be extended with google.protobuf.FieldMask for fine-grained control
+//       (REST: ?readMask=field1,field2)
+enum VmView {
+  // Default view, same as BASIC
+  VM_VIEW_UNSPECIFIED = 0;
+  // Basic fields only: ip_address, hostname, state
+  VM_VIEW_BASIC = 1;
+  // All fields
+  VM_VIEW_FULL = 2;
+}
+
+// Vm represents a virtual machine resource
+message Vm {
+  // Output only. IP address assigned to the VM
+  string ip_address = 1;
+
+  // Output only. Current state of the VM
+  VmState state = 2;
+
+  // Required. VM hostname
+  string hostname = 3;
+
+  // Required. Memory allocation in MiB
+  uint32 memory_in_mib = 4;
+
+  // Required. CPU allocation in milli-CPUs (1000 = 1 CPU)
+  uint32 milli_cpus = 5;
+
+  // Image name to fetch from image server
+  string image_name = 6;
+
+  // Input only. Image URL to fetch via HTTP
+  string image_url = 7;
+
+  // Additional owner users
+  repeated string owner_users = 8;
+
+  // VM tags
+  map<string, string> tags = 9;
+
+  // Input only. Don't start VM after creation
+  bool do_not_start = 10;
+}
+
+// CreateVmRequest for creating a VM
+message CreateVmRequest {
+  // Required. The VM to create
+  Vm vm = 1;
+}
+
+// StartVmRequest for starting a VM
+message StartVmRequest {
+  // Required. IP address of the VM to start
+  string ip_address = 1;
+}
+
+// DestroyVmRequest for destroying a VM
+message DestroyVmRequest {
+  // Required. IP address of the VM to destroy
+  string ip_address = 1;
+}
+
+// DestroyVmResponse is empty on success
+message DestroyVmResponse {}
+
+// ListVmsRequest for listing VMs
+message ListVmsRequest {
+  // Controls how much detail to return. Defaults to BASIC.
+  // Note: VM_VIEW_FULL returns UNIMPLEMENTED until backend optimization is done.
+  VmView view = 1;
+}
+
+// ListVmsResponse contains all VMs
+message ListVmsResponse {
+  repeated Vm vms = 1;
+}
+
+// GetVmRequest for getting a specific VM
+message GetVmRequest {
+  // Required. IP address of the VM to get
+  string ip_address = 1;
+  // Controls how much detail to return. Defaults to FULL for single VM.
+  VmView view = 2;
+}
+
+// CreateVmStreaming - Synchronous VM creation with streaming progress
+message CreateVmStreamingRequest {
+  oneof request {
+    // First message: VM to create with optional streaming parameters
+    CreateVmStreamingMetadata metadata = 1;
+    // Subsequent messages: Image data chunks
+    bytes image_data_chunk = 2;
+  }
+}
+
+// CreateVmStreamingMetadata contains VM spec plus streaming parameters
+message CreateVmStreamingMetadata {
+  // Required. The VM to create
+  Vm vm = 1;
+
+  // Size of image data to stream (0 if using image_name or image_url)
+  uint64 image_data_size = 2;
+
+  // DHCP timeout duration in nanoseconds
+  int64 dhcp_timeout = 3;
+
+  // Size of user data to stream after image data
+  uint64 user_data_size = 4;
+}
+
+// CreateVmStreamingResponse contains progress or final result
+message CreateVmStreamingResponse {
+  // Progress message during creation
+  string progress_message = 1;
+
+  // The created VM (only set in final response)
+  Vm vm = 2;
+
+  // Whether DHCP timed out
+  bool dhcp_timed_out = 3;
+}
+
