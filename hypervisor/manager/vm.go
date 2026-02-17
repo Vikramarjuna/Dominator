@@ -1338,15 +1338,16 @@ func (m *Manager) copyVm(conn *srpc.Conn, request proto.CopyVmRequest) error {
 	return nil
 }
 
-func (m *Manager) createVm(conn *srpc.Conn) error {
+// TODO: Update error messages to use standard prefixes for gRPC status mapping.
+func (m *Manager) createVm(conn srpc.StreamingConn) error {
 
-	sendError := func(conn *srpc.Conn, err error) error {
+	sendError := func(conn srpc.StreamingConn, err error) error {
 		m.Logger.Debugf(1, "CreateVm(%s) failed: %s\n", conn.Username(), err)
 		return conn.Encode(proto.CreateVmResponse{Error: err.Error()})
 	}
 
 	var ipAddressToSend net.IP
-	sendUpdate := func(conn *srpc.Conn, message string) error {
+	sendUpdate := func(conn srpc.StreamingConn, message string) error {
 		response := proto.CreateVmResponse{
 			IpAddress:       ipAddressToSend,
 			ProgressMessage: message,
@@ -1373,7 +1374,7 @@ func (m *Manager) createVm(conn *srpc.Conn) error {
 		if err := drainingReader.Drain(); err != nil {
 			return err
 		}
-		return sendError(conn, errors.New("Hypervisor is disabled"))
+		return sendError(conn, errors.New("unavailable: hypervisor is disabled"))
 	}
 	ownerUsers := make([]string, 1, len(request.OwnerUsers)+1)
 	ownerUsers[0] = conn.Username()
@@ -1381,7 +1382,7 @@ func (m *Manager) createVm(conn *srpc.Conn) error {
 		if err := drainingReader.Drain(); err != nil {
 			return err
 		}
-		return sendError(conn, errors.New("no authentication data"))
+		return sendError(conn, errors.New("unauthenticated: no authentication data"))
 	}
 	ownerUsers = append(ownerUsers, request.OwnerUsers...)
 	var identityExpires time.Time
@@ -1498,11 +1499,11 @@ func (m *Manager) createVm(conn *srpc.Conn) error {
 		}
 		defer httpResponse.Body.Close()
 		if httpResponse.StatusCode != http.StatusOK {
-			return sendError(conn, errors.New(httpResponse.Status))
+			return sendError(conn, errors.New("unavailable: image fetch failed: "+httpResponse.Status))
 		}
 		if httpResponse.ContentLength < 0 {
 			return sendError(conn,
-				errors.New("ContentLength from: "+request.ImageURL))
+				errors.New("invalid argument: image URL has no content length: "+request.ImageURL))
 		}
 		err = vm.copyRootVolume(request, bufio.NewReader(httpResponse.Body),
 			uint64(httpResponse.ContentLength), rootVolumeType)
@@ -1516,7 +1517,7 @@ func (m *Manager) createVm(conn *srpc.Conn) error {
 			return sendError(conn, err)
 		}
 	} else {
-		return sendError(conn, errors.New("no image specified"))
+		return sendError(conn, errors.New("invalid argument: no image specified"))
 	}
 	if len(request.Volumes) > 0 {
 		vm.Volumes[0].Interface = request.Volumes[0].Interface
@@ -2001,7 +2002,7 @@ func (m *Manager) getStoppedVmAndRemove(ipAddr net.IP,
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	if vm := m.vms[ipStr]; vm == nil {
-		return nil, fmt.Errorf("no VM with IP address: %s found", ipStr)
+		return nil, fmt.Errorf("VM with IP address %s not found", ipStr)
 	} else {
 		vm.mutex.Lock()
 		defer vm.mutex.Unlock()
@@ -2064,7 +2065,7 @@ func (m *Manager) getVmAndLock(ipAddr net.IP, write bool) (*vmInfoType, error) {
 	m.mutex.RLock()
 	if vm := m.vms[ipStr]; vm == nil {
 		m.mutex.RUnlock()
-		return nil, fmt.Errorf("no VM with IP address: %s found", ipStr)
+		return nil, fmt.Errorf("VM with IP address %s not found", ipStr)
 	} else {
 		if write {
 			vm.mutex.Lock()
