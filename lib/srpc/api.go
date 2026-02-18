@@ -50,6 +50,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"flag"
+	"io"
 	stdlog "log"
 	"net"
 	"os"
@@ -181,6 +182,17 @@ type AuthConn interface {
 	GetAuthInformation() *AuthInformation
 	GetPermittedMethods() map[string]struct{}
 	AllowMethodPowers() bool
+}
+
+// StreamingConn defines the interface for a streaming RPC connection.
+type StreamingConn interface {
+	Decoder
+	Encoder
+	Flush() error
+	GetAuthInformation() *AuthInformation
+	Username() string
+	io.Reader
+	Peek(n int) ([]byte, error)
 }
 
 type FakeClientOptions struct{}
