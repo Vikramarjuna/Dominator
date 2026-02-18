@@ -250,10 +250,3 @@ type wrappedStream struct {
 func (w *wrappedStream) Context() context.Context {
 	return w.ctx
 }
-
-// Metrics stubs - replaced by metrics.go in a later PR.
-func recordDeniedCall(fullMethod string)                                    {}
-func recordCallStart()                                                      {}
-func recordCallEnd(fullMethod string, startTime time.Time, err error)       {}
-func recordPanic()                                                          {}
-func registerMethodMetrics(serviceName string, methods map[string]struct{}) {}

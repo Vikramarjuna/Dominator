@@ -116,6 +116,14 @@ func GetClientTlsConfig() *tls.Config {
 	return clientTlsConfig.Clone()
 }
 
+// GetServerTlsConfig returns a clone of the server TLS config.
+func GetServerTlsConfig() *tls.Config {
+	if serverTlsConfig == nil {
+		return nil
+	}
+	return serverTlsConfig.Clone()
+}
+
 // GetEarliestClientCertExpiration returns the earliest expiration time of any
 // certificate registered with RegisterClientTlsConfig. The zero value is
 // returned if there are no certificates with an expiration time.
