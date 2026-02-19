@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bufio"
 	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"golang.org/x/net/http2"
@@ -26,6 +28,8 @@ type Config struct {
 }
 
 // Start starts a server. Routes by content-type and path. Blocks.
+// Uses protocol detection: TLS connections get TLS handling, plain HTTP passes
+// through for SRPC's own TLS upgrade mechanism.
 func Start(config Config) error {
 	if config.HttpHandler == nil {
 		return fmt.Errorf("HttpHandler is required")
@@ -42,7 +46,6 @@ func Start(config Config) error {
 	if err != nil {
 		return fmt.Errorf("cannot create listener: %w", err)
 	}
-	tlsListener := tls.NewListener(tcpListener, tlsConfig)
 
 	handler, err := buildHandler(config)
 	if err != nil {
@@ -62,7 +65,13 @@ func Start(config Config) error {
 		}
 	}
 
-	return server.Serve(tlsListener)
+	// Use protocol-detecting listener: TLS clients get TLS, plain HTTP
+	// passes through for SRPC's HTTP CONNECT + TLS upgrade mechanism.
+	protoListener := &protocolDetectingListener{
+		Listener:  tcpListener,
+		tlsConfig: tlsConfig,
+	}
+	return server.Serve(protoListener)
 }
 
 func buildHandler(config Config) (http.Handler, error) {
@@ -100,6 +109,9 @@ func buildHandler(config Config) (http.Handler, error) {
 			grpcServer.ServeHTTP(w, r)
 		case isRestApiPath(r.URL.Path):
 			restHandler.ServeHTTP(w, r)
+		case isSrpcPath(r.URL.Path):
+			// SRPC handlers are registered on http.DefaultServeMux
+			http.DefaultServeMux.ServeHTTP(w, r)
 		default:
 			config.HttpHandler.ServeHTTP(w, r)
 		}
@@ -108,4 +120,72 @@ func buildHandler(config Config) (http.Handler, error) {
 
 func isRestApiPath(path string) bool {
 	return strings.HasPrefix(path, "/v1/")
+}
+
+func isSrpcPath(path string) bool {
+	return strings.HasPrefix(path, "/_goSRPC_/") ||
+		strings.HasPrefix(path, "/_go_TLS_SRPC_/") ||
+		strings.HasPrefix(path, "/_SRPC_/")
+}
+
+// protocolDetectingListener wraps a net.Listener and detects TLS vs plain HTTP.
+type protocolDetectingListener struct {
+	net.Listener
+	tlsConfig *tls.Config
+}
+
+func (l *protocolDetectingListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	// Extract TCP connection if available.
+	var tcpConn *net.TCPConn
+	if tc, ok := conn.(*net.TCPConn); ok {
+		tcpConn = tc
+	}
+	// Wrap connection with buffered reader for peeking.
+	bufferedConn := &bufferedConn{
+		Conn:    conn,
+		reader:  bufio.NewReader(conn),
+		tcpConn: tcpConn,
+	}
+	// Peek at first byte to detect TLS.
+	firstByte, err := bufferedConn.reader.Peek(1)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	// TLS ClientHello starts with 0x16 (handshake record type).
+	if firstByte[0] == 0x16 {
+		return tls.Server(bufferedConn, l.tlsConfig), nil
+	}
+	// Plain HTTP - return as-is for SRPC's HTTP CONNECT + TLS upgrade.
+	return bufferedConn, nil
+}
+
+// bufferedConn wraps a net.Conn with a buffered reader for peeking.
+// Implements TCP-specific methods if the underlying connection is TCP.
+type bufferedConn struct {
+	net.Conn
+	reader  *bufio.Reader
+	tcpConn *net.TCPConn // nil if not TCP
+}
+
+func (c *bufferedConn) Read(b []byte) (int, error) {
+	return c.reader.Read(b)
+}
+
+func (c *bufferedConn) SetKeepAlive(keepalive bool) error {
+	if c.tcpConn != nil {
+		return c.tcpConn.SetKeepAlive(keepalive)
+	}
+	return nil
+}
+
+func (c *bufferedConn) SetKeepAlivePeriod(d time.Duration) error {
+	if c.tcpConn != nil {
+		return c.tcpConn.SetKeepAlivePeriod(d)
+	}
+	return nil
 }
