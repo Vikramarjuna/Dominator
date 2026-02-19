@@ -140,7 +140,6 @@ func handleSignals(flusher Flusher, logger flushLogger) {
 }
 
 func run() {
-	fmt.Fprintln(os.Stderr, "DEBUG: run() starting")
 	if *testMemoryAvailable > 0 {
 		nBytes := *testMemoryAvailable << 20
 		mem := make([]byte, nBytes)
@@ -149,16 +148,12 @@ func run() {
 		}
 		os.Exit(0)
 	}
-	fmt.Fprintln(os.Stderr, "DEBUG: before tricorder.RegisterFlags()")
 	tricorder.RegisterFlags()
-	fmt.Fprintln(os.Stderr, "DEBUG: after tricorder.RegisterFlags()")
 	if os.Geteuid() != 0 {
 		fmt.Fprintln(os.Stderr, "Must run the Hypervisor as root")
 		os.Exit(1)
 	}
-	fmt.Fprintln(os.Stderr, "DEBUG: creating logger")
 	logger := serverlogger.New("")
-	fmt.Fprintln(os.Stderr, "DEBUG: logger created")
 	srpc.SetDefaultLogger(logger)
 	params := setupserver.Params{Logger: logger}
 	if err := setupserver.SetupTlsWithParams(params); err != nil {
