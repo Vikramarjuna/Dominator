@@ -52,10 +52,12 @@ const (
 	WatchdogModelI6300esb = 2
 )
 
+// @grpc
 type AcknowledgeVmRequest struct {
 	IpAddress net.IP
 }
 
+// @grpc
 type AcknowledgeVmResponse struct {
 	Error string
 }

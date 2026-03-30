@@ -6,6 +6,8 @@ import (
 	"github.com/Cloud-Foundations/Dominator/proto/hypervisor"
 )
 
+// @grpc
+// @http POST /v1/vms/{ip_address}/acknowledge
 func (t *srpcType) AcknowledgeVm(conn *srpc.Conn,
 	request hypervisor.AcknowledgeVmRequest,
 	reply *hypervisor.AcknowledgeVmResponse) error {

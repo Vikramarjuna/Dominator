@@ -82,14 +82,21 @@ func authorizeRequest(ctx context.Context, fullMethod string) (context.Context, 
 	return ContextWithConn(ctx, conn), nil
 }
 
-// UnaryAuthInterceptor handles authentication and authorization for unary RPCs.
-func UnaryAuthInterceptor(ctx context.Context, req interface{},
+// UnarySecurityInterceptor handles authentication, rate limiting, and authorization for unary RPCs.
+func UnarySecurityInterceptor(ctx context.Context, req interface{},
 	info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 
+	// Step 1: Authenticate and authorize
 	ctx, err := authorizeRequest(ctx, info.FullMethod)
 	if err != nil {
 		return nil, err
 	}
+
+	// Step 2: Rate limiting (TODO: implement in later PR)
+	// conn := ConnFromContext(ctx)
+	// if err := checkRateLimits(conn, info.FullMethod); err != nil {
+	//     return nil, err
+	// }
 
 	recordCallStart()
 	startTime := time.Now()
@@ -104,14 +111,21 @@ func UnaryAuthInterceptor(ctx context.Context, req interface{},
 	return resp, err
 }
 
-// StreamAuthInterceptor handles authentication and authorization for streaming RPCs.
-func StreamAuthInterceptor(srv interface{}, ss grpc.ServerStream,
+// StreamSecurityInterceptor handles authentication, rate limiting, and authorization for streaming RPCs.
+func StreamSecurityInterceptor(srv interface{}, ss grpc.ServerStream,
 	info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 
+	// Step 1: Authenticate and authorize
 	ctx, err := authorizeRequest(ss.Context(), info.FullMethod)
 	if err != nil {
 		return err
 	}
+
+	// Step 2: Rate limiting (TODO: implement in later PR)
+	// conn := ConnFromContext(ctx)
+	// if err := checkRateLimits(conn, info.FullMethod); err != nil {
+	//     return err
+	// }
 
 	wrapped := &wrappedStream{ServerStream: ss, ctx: ctx}
 	recordCallStart()
@@ -251,9 +265,21 @@ func (w *wrappedStream) Context() context.Context {
 	return w.ctx
 }
 
+// checkRateLimits checks if the request should be rate limited.
+// TODO: Implement in a later PR. Should check:
+//   - Per-user rate limit (use conn.GetAuthInformation().Username)
+//   - Global rate limit (shared across all users)
+//   - Per-method rate limit (for expensive operations)
+// Returns codes.ResourceExhausted if any limit is exceeded.
+func checkRateLimits(conn *Conn, fullMethod string) error {
+	// TODO: Implement rate limiting
+	return nil
+}
+
 // Metrics stubs - replaced by metrics.go in a later PR.
 func recordDeniedCall(fullMethod string)                                    {}
 func recordCallStart()                                                      {}
 func recordCallEnd(fullMethod string, startTime time.Time, err error)       {}
 func recordPanic()                                                          {}
 func registerMethodMetrics(serviceName string, methods map[string]struct{}) {}
+func recordRateLimitHit(username, fullMethod, limitType string)             {}

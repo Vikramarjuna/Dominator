@@ -6,6 +6,8 @@ import (
 	"github.com/Cloud-Foundations/Dominator/proto/hypervisor"
 )
 
+// @grpc
+// @http GET /v1/vms/{ip_address}
 func (t *srpcType) GetVmInfo(conn *srpc.Conn,
 	request hypervisor.GetVmInfoRequest,
 	reply *hypervisor.GetVmInfoResponse) error {

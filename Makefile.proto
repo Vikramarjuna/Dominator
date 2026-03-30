@@ -1,0 +1,121 @@
+# Proto generation makefile for Dominator
+# Include this from the main Makefile or run directly: make -f Makefile.proto
+
+# Ensure protoc plugins are in PATH
+export PATH := $(PATH):$(shell go env GOPATH)/bin
+
+# Proto-gen binary
+PROTO_GEN := ./cmd/proto-gen/proto-gen
+
+#===================================================================
+# Hypervisor
+#===================================================================
+
+.PHONY: proto-gen-hypervisor
+proto-gen-hypervisor:
+	@echo "Generating proto for hypervisor..."
+	$(PROTO_GEN) \
+		--rpcd hypervisor/rpcd \
+		--proto proto/hypervisor \
+		--output proto/hypervisor/grpc/hypervisor.proto \
+		--converters proto/hypervisor/converters_gen.go \
+		-v
+
+#===================================================================
+# FleetManager (example with cross-package imports)
+#===================================================================
+
+.PHONY: proto-gen-fleetmanager
+proto-gen-fleetmanager:
+	@echo "Generating proto for fleetmanager..."
+	$(PROTO_GEN) \
+		--rpcd fleetmanager/rpcd \
+		--proto proto/fleetmanager \
+		--output proto/fleetmanager/grpc/fleetmanager.proto \
+		--converters proto/fleetmanager/converters_gen.go \
+		--imports "hypervisor=proto/hypervisor/grpc/hypervisor.proto" \
+		-v
+
+#===================================================================
+# ImageServer
+#===================================================================
+
+.PHONY: proto-gen-imageserver
+proto-gen-imageserver:
+	@echo "Generating proto for imageserver..."
+	$(PROTO_GEN) \
+		--rpcd imageserver/rpcd \
+		--proto proto/imageserver \
+		--output proto/imageserver/grpc/imageserver.proto \
+		--converters proto/imageserver/converters_gen.go \
+		-v
+
+#===================================================================
+# All services
+#===================================================================
+
+.PHONY: proto-gen
+proto-gen: proto-gen-hypervisor
+	@echo "Proto generation complete!"
+
+# Uncomment as you add more services:
+# proto-gen: proto-gen-hypervisor proto-gen-fleetmanager proto-gen-imageserver
+
+#===================================================================
+# Validation (for CI)
+#===================================================================
+
+.PHONY: proto-check
+proto-check:
+	@echo "Checking if generated proto files are up-to-date..."
+	@$(MAKE) -f Makefile.proto proto-gen
+	@if git diff --exit-code proto/*/grpc/*.proto proto/*/converters_gen.go proto/*/grpc/*.pb.go 2>/dev/null; then \
+		echo "✓ Generated files are up-to-date"; \
+	else \
+		echo "✗ ERROR: Generated files are out of date."; \
+		echo "  Run 'make -f Makefile.proto proto-gen' and commit the changes."; \
+		exit 1; \
+	fi
+
+#===================================================================
+# Clean generated files
+#===================================================================
+
+.PHONY: proto-clean
+proto-clean:
+	@echo "Cleaning generated proto files..."
+	rm -f proto/*/grpc/*.proto
+	rm -f proto/*/grpc/*.pb.go
+	rm -f proto/*/converters_gen.go
+	@echo "Clean complete!"
+
+#===================================================================
+# Install dependencies
+#===================================================================
+
+.PHONY: proto-install-deps
+proto-install-deps:
+	@echo "Installing protoc plugins..."
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+	@echo "✓ Protoc plugins installed"
+	@echo "Make sure protoc is installed: https://grpc.io/docs/protoc-installation/"
+
+#===================================================================
+# Help
+#===================================================================
+
+.PHONY: proto-help
+proto-help:
+	@echo "Proto generation targets:"
+	@echo "  make -f Makefile.proto proto-gen              - Generate all proto files"
+	@echo "  make -f Makefile.proto proto-gen-hypervisor   - Generate hypervisor proto"
+	@echo "  make -f Makefile.proto proto-check            - Verify generated files are up-to-date (CI)"
+	@echo "  make -f Makefile.proto proto-clean            - Remove generated files"
+	@echo "  make -f Makefile.proto proto-install-deps     - Install protoc plugins"
+	@echo ""
+	@echo "Individual services:"
+	@echo "  make -f Makefile.proto proto-gen-hypervisor"
+	@echo "  make -f Makefile.proto proto-gen-fleetmanager"
+	@echo "  make -f Makefile.proto proto-gen-imageserver"
+
