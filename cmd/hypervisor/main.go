@@ -43,6 +43,8 @@ type flushLogger interface {
 }
 
 var (
+	allowUnauthenticatedReads = flag.Bool("allowUnauthenticatedReads", false,
+		"If true, allow unauthenticated access to read-only methods")
 	dhcpServerOnBridgesOnly = flag.Bool("dhcpServerOnBridgesOnly", false,
 		"If true, run the DHCP server on bridge interfaces only")
 	identityProvider = flag.String("identityProvider", "",
@@ -232,8 +234,11 @@ func run() {
 		logger.Println("No bridges found: entering log-only mode")
 	} else {
 		httpd.AddHtmlWriter(dhcpServer)
-		rpcHtmlWriter, err := rpcd.Setup(managerObj, dhcpServer, tftpbootServer,
-			logger)
+		rpcHtmlWriter, err := rpcd.Setup(
+			rpcd.Config{
+				AllowUnauthenticatedReads: *allowUnauthenticatedReads,
+			},
+			managerObj, dhcpServer, tftpbootServer, logger)
 		if err != nil {
 			logger.Fatalf("Cannot start rpcd: %s\n", err)
 		}

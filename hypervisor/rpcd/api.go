@@ -11,6 +11,10 @@ import (
 	proto "github.com/Cloud-Foundations/Dominator/proto/hypervisor"
 )
 
+type Config struct {
+	AllowUnauthenticatedReads bool
+}
+
 type DhcpServer interface {
 	AddLease(address proto.Address, hostname string) error
 	AddNetbootLease(address proto.Address, hostname string,
@@ -44,7 +48,7 @@ func (hw *htmlWriter) WriteHtml(writer io.Writer) {
 	hw.writeHtml(writer)
 }
 
-func Setup(manager *manager.Manager, dhcpServer DhcpServer,
+func Setup(config Config, manager *manager.Manager, dhcpServer DhcpServer,
 	tftpbootServer TftpbootServer, logger log.DebugLogger) (
 	*htmlWriter, error) {
 	srpcObj := &srpcType{
@@ -58,8 +62,75 @@ func Setup(manager *manager.Manager, dhcpServer DhcpServer,
 		func(_ string, authInfo *srpc.AuthInformation) bool {
 			return manager.CheckOwnership(authInfo)
 		})
-	srpc.RegisterNameWithOptions("Hypervisor", srpcObj, srpc.ReceiverOptions{
-		UnauthenticatedMethods: []string{
+	publicMethods := []string{
+		"AcknowledgeVm",
+		"AddVmVolumes",
+		"BecomePrimaryVmOwner",
+		"ChangeVmConsoleType",
+		"ChangeVmCpuPriority",
+		"ChangeVmDestroyProtection",
+		"ChangeVmHostname",
+		"ChangeVmMachineType",
+		"ChangeVmNumNetworkQueues",
+		"ChangeVmOwnerGroups",
+		"ChangeVmOwnerUsers",
+		"ChangeVmSize",
+		"ChangeVmSubnet",
+		"ChangeVmTags",
+		"ChangeVmVolumeInterfaces",
+		"ChangeVmVolumeSize",
+		"ChangeVmVolumeStorageIndex",
+		"CommitImportedVm",
+		"ConnectToVmConsole",
+		"ConnectToVmSerialPort",
+		"CopyVm",
+		"CreateVm",
+		"DebugVmImage",
+		"DeleteVmVolume",
+		"DestroyVm",
+		"DiscardVmAccessToken",
+		"DiscardVmOldImage",
+		"DiscardVmOldUserData",
+		"DiscardVmSnapshot",
+		"ExportLocalVm",
+		"GetCapacity",
+		"GetIdentityProvider",
+		"GetPublicKey",
+		"GetRootCookiePath",
+		"GetUpdates",
+		"GetVmAccessToken",
+		"GetVmCreateRequest",
+		"GetVmInfo",
+		"GetVmInfos",
+		"GetVmLastPatchLog",
+		"GetVmUserData",
+		"GetVmVolume",
+		"GetVmVolumeStorageConfiguration",
+		"ImportLocalVm",
+		"ListSubnets",
+		"ListVMs",
+		"ListVolumeDirectories",
+		"MigrateVm",
+		"PatchVmImage",
+		"ProbeVmPort",
+		"RebootVm",
+		"ReplaceVmCredentials",
+		"ReplaceVmIdentity",
+		"ReplaceVmImage",
+		"ReplaceVmUserData",
+		"RestoreVmFromSnapshot",
+		"RestoreVmImage",
+		"RestoreVmUserData",
+		"ReorderVmVolumes",
+		"ScanVmRoot",
+		"SnapshotVm",
+		"StartVm",
+		"StopVm",
+		"TraceVmMetadata",
+	}
+	var unauthenticatedMethods []string
+	if config.AllowUnauthenticatedReads {
+		unauthenticatedMethods = []string{
 			"GetCapacity",
 			"GetVmInfo",
 			"GetVmInfos",
@@ -67,65 +138,11 @@ func Setup(manager *manager.Manager, dhcpServer DhcpServer,
 			"ListSubnets",
 			"ListVMs",
 			"ListVolumeDirectories",
-		},
-		PublicMethods: []string{
-			"AcknowledgeVm",
-			"AddVmVolumes",
-			"BecomePrimaryVmOwner",
-			"ChangeVmConsoleType",
-			"ChangeVmCpuPriority",
-			"ChangeVmDestroyProtection",
-			"ChangeVmHostname",
-			"ChangeVmMachineType",
-			"ChangeVmNumNetworkQueues",
-			"ChangeVmOwnerGroups",
-			"ChangeVmOwnerUsers",
-			"ChangeVmSize",
-			"ChangeVmSubnet",
-			"ChangeVmTags",
-			"ChangeVmVolumeInterfaces",
-			"ChangeVmVolumeSize",
-			"ChangeVmVolumeStorageIndex",
-			"CommitImportedVm",
-			"ConnectToVmConsole",
-			"ConnectToVmSerialPort",
-			"CopyVm",
-			"CreateVm",
-			"DebugVmImage",
-			"DeleteVmVolume",
-			"DestroyVm",
-			"DiscardVmAccessToken",
-			"DiscardVmOldImage",
-			"DiscardVmOldUserData",
-			"DiscardVmSnapshot",
-			"ExportLocalVm",
-			"GetIdentityProvider",
-			"GetPublicKey",
-			"GetRootCookiePath",
-			"GetUpdates",
-			"GetVmAccessToken",
-			"GetVmCreateRequest",
-			"GetVmUserData",
-			"GetVmVolume",
-			"GetVmVolumeStorageConfiguration",
-			"ImportLocalVm",
-			"MigrateVm",
-			"PatchVmImage",
-			"ProbeVmPort",
-			"RebootVm",
-			"ReplaceVmCredentials",
-			"ReplaceVmIdentity",
-			"ReplaceVmImage",
-			"ReplaceVmUserData",
-			"RestoreVmFromSnapshot",
-			"RestoreVmImage",
-			"RestoreVmUserData",
-			"ReorderVmVolumes",
-			"ScanVmRoot",
-			"SnapshotVm",
-			"StartVm",
-			"StopVm",
-			"TraceVmMetadata",
-		}})
+		}
+	}
+	srpc.RegisterNameWithOptions("Hypervisor", srpcObj, srpc.ReceiverOptions{
+		PublicMethods:          publicMethods,
+		UnauthenticatedMethods: unauthenticatedMethods,
+	})
 	return (*htmlWriter)(srpcObj), nil
 }
