@@ -7,6 +7,7 @@ import (
 	"github.com/Cloud-Foundations/Dominator/lib/filesystem"
 	"github.com/Cloud-Foundations/Dominator/lib/filter"
 	"github.com/Cloud-Foundations/Dominator/lib/tags"
+	"github.com/Cloud-Foundations/Dominator/lib/types"
 )
 
 const (
@@ -560,7 +561,7 @@ type GetVmVolumeStorageConfigurationResponse struct {
 	VolumeStorageIndices []uint        `json:",omitempty"`
 }
 
-type GroupId uint
+type GroupId = types.GroupId
 
 type HoldLockRequest struct {
 	Timeout   time.Duration
@@ -912,7 +913,7 @@ type UpdateSubnetsResponse struct {
 	Error string
 }
 
-type UserId uint
+type UserId = types.UserId
 
 type VmInfo struct {
 	Address             Address
