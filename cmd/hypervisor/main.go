@@ -238,7 +238,12 @@ func run() {
 			rpcd.Config{
 				AllowUnauthenticatedReads: *allowUnauthenticatedReads,
 			},
-			managerObj, dhcpServer, tftpbootServer, logger)
+			rpcd.Params{
+				DhcpServer:     dhcpServer,
+				Logger:         logger,
+				Manager:        managerObj,
+				TftpbootServer: tftpbootServer,
+			})
 		if err != nil {
 			logger.Fatalf("Cannot start rpcd: %s\n", err)
 		}

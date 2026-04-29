@@ -15,6 +15,13 @@ type Config struct {
 	AllowUnauthenticatedReads bool
 }
 
+type Params struct {
+	DhcpServer     DhcpServer
+	Logger         log.DebugLogger
+	Manager        *manager.Manager
+	TftpbootServer TftpbootServer
+}
+
 type DhcpServer interface {
 	AddLease(address proto.Address, hostname string) error
 	AddNetbootLease(address proto.Address, hostname string,
@@ -48,19 +55,17 @@ func (hw *htmlWriter) WriteHtml(writer io.Writer) {
 	hw.writeHtml(writer)
 }
 
-func Setup(config Config, manager *manager.Manager, dhcpServer DhcpServer,
-	tftpbootServer TftpbootServer, logger log.DebugLogger) (
-	*htmlWriter, error) {
+func Setup(config Config, params Params) (*htmlWriter, error) {
 	srpcObj := &srpcType{
-		dhcpServer:     dhcpServer,
-		logger:         logger,
-		manager:        manager,
-		tftpbootServer: tftpbootServer,
+		dhcpServer:     params.DhcpServer,
+		logger:         params.Logger,
+		manager:        params.Manager,
+		tftpbootServer: params.TftpbootServer,
 		externalLeases: make(map[ipv4Address]string),
 	}
 	srpc.SetDefaultGrantMethod(
 		func(_ string, authInfo *srpc.AuthInformation) bool {
-			return manager.CheckOwnership(authInfo)
+			return params.Manager.CheckOwnership(authInfo)
 		})
 	publicMethods := []string{
 		"AcknowledgeVm",
@@ -137,7 +142,6 @@ func Setup(config Config, manager *manager.Manager, dhcpServer DhcpServer,
 			"GetVmLastPatchLog",
 			"ListSubnets",
 			"ListVMs",
-			"ListVolumeDirectories",
 		}
 	}
 	srpc.RegisterNameWithOptions("Hypervisor", srpcObj, srpc.ReceiverOptions{
