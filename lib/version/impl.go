@@ -3,7 +3,6 @@ package version
 import (
 	_ "embed"
 	"runtime"
-	"runtime/debug"
 	"strconv"
 	"strings"
 )
@@ -11,35 +10,31 @@ import (
 //go:embed BUILD_INFO
 var buildInfoRaw string
 
-type vcsInfo struct {
-	revision  string
+type buildInfo struct {
+	version   string
+	commit    string
 	buildTime string
 	dirty     bool
-}
-
-type buildInfo struct {
-	version string
-	origin  string
-	branch  string
-	behind  int
-	isFork  bool
+	origin    string
+	branch    string
+	behind    int
+	isFork    bool
 }
 
 func get() Info {
-	vcs := getVCSInfo()
 	bi := parseBuildInfo()
 	version := bi.version
-	if vcs.dirty {
+	if bi.dirty {
 		version += "-dirty"
 	}
 	return Info{
 		Version:       version,
-		GitCommit:     vcs.revision,
+		GitCommit:     bi.commit,
 		GitOrigin:     bi.origin,
 		GitBranch:     bi.branch,
 		CommitsBehind: bi.behind,
 		IsFork:        bi.isFork,
-		BuildDate:     vcs.buildTime,
+		BuildDate:     bi.buildTime,
 		GoVersion:     runtime.Version(),
 	}
 }
@@ -91,6 +86,12 @@ func parseBuildInfo() buildInfo {
 		switch key {
 		case "version":
 			info.version = val
+		case "commit":
+			info.commit = val
+		case "buildtime":
+			info.buildTime = val
+		case "dirty":
+			info.dirty = val == "true"
 		case "origin":
 			info.origin = val
 		case "branch":
@@ -101,32 +102,6 @@ func parseBuildInfo() buildInfo {
 			}
 		case "fork":
 			info.isFork = val == "true"
-		}
-	}
-	return info
-}
-
-func getVCSInfo() vcsInfo {
-	info := vcsInfo{
-		revision:  "unknown",
-		buildTime: "unknown",
-	}
-	buildInfo, ok := debug.ReadBuildInfo()
-	if !ok {
-		return info
-	}
-	for _, s := range buildInfo.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			if len(s.Value) > 8 {
-				info.revision = s.Value[:8]
-			} else {
-				info.revision = s.Value
-			}
-		case "vcs.time":
-			info.buildTime = s.Value
-		case "vcs.modified":
-			info.dirty = s.Value == "true"
 		}
 	}
 	return info

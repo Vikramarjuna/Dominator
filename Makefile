@@ -73,6 +73,13 @@ $(BUILD_INFO_FILE): $(BUILD_INFO_DEPS)
 	raw_origin=$$(git remote get-url origin 2>/dev/null || echo unknown); \
 	origin=$$(echo "$$raw_origin" | sed -e 's|^git@[^:]*:||' -e 's|^https://github.com/||' -e 's|\.git$$||'); \
 	branch=$$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown); \
+	commit=$$(git rev-parse --short=8 HEAD 2>/dev/null || echo unknown); \
+	buildtime=$$(git log -1 --format=%cI HEAD 2>/dev/null || echo unknown); \
+	if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then \
+		dirty=true; \
+	else \
+		dirty=false; \
+	fi; \
 	case "$$raw_origin" in *Cloud-Foundations*) is_fork=false;; *) is_fork=true;; esac; \
 	if [ "$$is_fork" = false ] && [ "$$branch" = "master" ]; then \
 		behind=0; \
@@ -84,6 +91,9 @@ $(BUILD_INFO_FILE): $(BUILD_INFO_DEPS)
 	fi; \
 	{ \
 		echo "version=$$version"; \
+		echo "commit=$$commit"; \
+		echo "buildtime=$$buildtime"; \
+		echo "dirty=$$dirty"; \
 		echo "origin=$$origin"; \
 		echo "branch=$$branch"; \
 		echo "behind=$$behind"; \
