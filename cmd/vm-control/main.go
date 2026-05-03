@@ -23,6 +23,13 @@ import (
 var (
 	adjacentVM = flag.String("adjacentVM", "",
 		"IP address of VM adjacent (same Hypervisor) to VM being created")
+	allocationManagerHostname = flag.String("allocationManagerHostname", "",
+		"Hostname of Allocation Manager")
+	allocationManagerPortNum = flag.Uint("allocationManagerPortNum",
+		constants.FleetManagerPortNumber,
+		"Port number of Allocation Manager")
+	allocateTimeout = flag.Duration("allocateTimeout", 0,
+		"Time to wait before timing out on allocation request for VM (default infinite")
 	consoleType hyper_proto.ConsoleType
 	cpuPriority = flag.Int("cpuPriority", 0,
 		"CPU priority (-20:+19) for VM process on Hypervisor")
@@ -59,6 +66,8 @@ var (
 		"Filename of PEM-encoded key available from metadata service (deprecated: use identityName instead)")
 	identityName = flag.String("identityName", "",
 		"Identity name for requesting role certificates from IdentityProvider")
+	includeAllocationRequests = flag.Bool("includeAllocationRequests", false,
+		"If true, include allocation requests in get-allocation-updates")
 	includeUnhealthy = flag.Bool("includeUnhealthy", false,
 		"If true, list connected but unhealthy hypervisors")
 	includeVMs = flag.Bool("includeVMs", true,
@@ -250,6 +259,8 @@ var subcommands = []commands.Command{
 	{"discard-vm-snapshot", "IPaddr", 1, 1, discardVmSnapshotSubcommand},
 	{"export-local-vm", "IPaddr", 1, 1, exportLocalVmSubcommand},
 	{"export-virsh-vm", "IPaddr", 1, 1, exportVirshVmSubcommand},
+	{"get-allocation-updates", "starting-position", 1, 1,
+		getAllocationUpdatesSubcommand},
 	{"get-hypervisors", "", 0, 0, getHypervisorsSubcommand},
 	{"get-ip-info", "IPaddr", 1, 1, getIpInfoSubcommand},
 	{"get-vm-create-request", "IPaddr", 1, 1, getVmCreateRequestSubcommand},

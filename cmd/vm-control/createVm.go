@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -16,6 +15,7 @@ import (
 
 	hyperclient "github.com/Cloud-Foundations/Dominator/hypervisor/client"
 	imgclient "github.com/Cloud-Foundations/Dominator/imageserver/client"
+	"github.com/Cloud-Foundations/Dominator/lib/errors"
 	"github.com/Cloud-Foundations/Dominator/lib/filesystem"
 	"github.com/Cloud-Foundations/Dominator/lib/filesystem/util"
 	"github.com/Cloud-Foundations/Dominator/lib/format"
@@ -26,6 +26,8 @@ import (
 	"github.com/Cloud-Foundations/Dominator/lib/log"
 	"github.com/Cloud-Foundations/Dominator/lib/srpc"
 	"github.com/Cloud-Foundations/Dominator/lib/tags"
+	"github.com/Cloud-Foundations/Dominator/lib/types"
+	fm_proto "github.com/Cloud-Foundations/Dominator/proto/fleetmanager"
 	hyper_proto "github.com/Cloud-Foundations/Dominator/proto/hypervisor"
 )
 
@@ -48,6 +50,121 @@ type wrappedReadCloser struct {
 
 func init() {
 	rand.Seed(time.Now().Unix() + time.Now().UnixNano())
+}
+
+func allocateAndCreateVM(createRequest *createVmRequest,
+	tmpVmInfo *hyper_proto.VmInfo) error {
+	volumes := make([]fm_proto.VolumeSpecification, 0, len(tmpVmInfo.Volumes))
+	for _, volume := range tmpVmInfo.Volumes {
+		volumes = append(volumes, fm_proto.VolumeSpecification{
+			Size: types.Bytes(volume.Size),
+		})
+	}
+	allocateRequest := fm_proto.AllocateRequest{
+		VMs: []fm_proto.VmAllocationSpecification{
+			{
+				HypervisorTagsToMatch: hypervisorTagsToMatch,
+				Location:              *location,
+				MemoryInMiB:           createRequest.MemoryInMiB,
+				MilliCPUs:             createRequest.MilliCPUs,
+				NetworkInterfaces: []fm_proto.NetworkInterfaceSpecification{
+					{
+						SubnetId: createRequest.SubnetId,
+					},
+				},
+				Volumes: volumes,
+			},
+		},
+	}
+	if *allocateTimeout > 0 {
+		allocateRequest.Deadline = time.Now().Add(*allocateTimeout)
+	}
+	address := fmt.Sprintf("%s:%d",
+		*allocationManagerHostname, *allocationManagerPortNum)
+	allocatorClient, err := dialAllocationManager(address)
+	if err != nil {
+		return err
+	}
+	defer allocatorClient.Close()
+	var allocateResponse fm_proto.AllocateResponse
+	err = allocatorClient.RequestReply("FleetManager.Allocate", allocateRequest,
+		&allocateResponse)
+	if err != nil {
+		return err
+	}
+	if allocateResponse.Error != "" {
+		return errors.New(allocateResponse.Error)
+	}
+	logger.Printf("RequestId: %s\n", allocateResponse.RequestId)
+	createRequest.Tags["AllocationRequestId"] =
+		string(allocateResponse.RequestId)
+	watchConn, err := allocatorClient.Call("FleetManager.GetAllocationUpdates")
+	if err != nil {
+		return fmt.Errorf("error calling FleetManager.GetAllocationUpdates: %s",
+			err)
+	}
+	doClose := true
+	defer func() {
+		if doClose {
+			watchConn.Close()
+		}
+	}()
+	err = watchConn.Encode(fm_proto.GetAllocationUpdatesRequest{
+		Position:       allocateResponse.UpdatePosition,
+		UntilRequestId: allocateResponse.RequestId,
+	})
+	if err != nil {
+		return err
+	}
+	if err := watchConn.Flush(); err != nil {
+		return err
+	}
+	var foundAllocation *fm_proto.Allocation
+	for {
+		var response fm_proto.AllocationUpdate
+		if err := watchConn.Decode(&response); err != nil {
+			return fmt.Errorf("error decoding AllocationUpdate response: %s",
+				err)
+		}
+		if err := errors.New(response.Error); err != nil {
+			return err
+		}
+		if response.RequestId != allocateResponse.RequestId {
+			continue
+		}
+		if available := response.Available; available != nil {
+			foundAllocation = available
+			break
+		}
+		if deleted := response.Deleted; deleted != nil {
+			if err := errors.New(deleted.Error); err != nil {
+				return err
+			}
+			return fmt.Errorf("allocation request %s", deleted.Reason)
+		}
+	}
+	doClose = false
+	if err := watchConn.Close(); err != nil {
+		return err
+	}
+	logger.Debugf(0, "creating VM on %s\n",
+		foundAllocation.VMs[0].HypervisorAddress)
+	err = createVmOnHypervisor(foundAllocation.VMs[0].HypervisorAddress,
+		*createRequest, logger)
+	if err != nil {
+		logger.Debugf(0, "cancelling allocation request: %s\n",
+			allocateResponse.RequestId)
+		var response fm_proto.CancelAllocationResponse
+		err := allocatorClient.RequestReply("FleetManager.CancelAllocation",
+			fm_proto.CancelAllocationRequest{allocateResponse.RequestId},
+			&response)
+		if err != nil {
+			logger.Println(err)
+		} else if response.Error != "" {
+			logger.Println(response.Error)
+		}
+	}
+	return err
 }
 
 func approximateImageUsage() (uint64, error) {
@@ -210,6 +327,9 @@ func createVm(logger log.DebugLogger) error {
 	tmpVmInfo, err := approximateVolumesForCreateRequest(request.VmInfo)
 	if err != nil {
 		return err
+	}
+	if *allocationManagerHostname != "" {
+		return allocateAndCreateVM(request, tmpVmInfo)
 	}
 	if hypervisor, err := getHypervisorAddress(*tmpVmInfo, logger); err != nil {
 		return err
@@ -673,8 +793,8 @@ func updateVolumeInitParams(vinitParams []volumeInitParams) error {
 		} else if inode, ok := response.Inodes[inum]; !ok {
 			continue
 		} else {
-			vinit.RootGroupId = hyper_proto.GroupId(inode.GetGid())
-			vinit.RootUserId = hyper_proto.UserId(inode.GetUid())
+			vinit.RootGroupId = types.GroupId(inode.GetGid())
+			vinit.RootUserId = types.UserId(inode.GetUid())
 			vinitParams[index] = vinit
 		}
 	}
