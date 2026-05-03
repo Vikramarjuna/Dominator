@@ -2,9 +2,19 @@ package fleetmanager
 
 import (
 	"net"
+	"time"
 
 	"github.com/Cloud-Foundations/Dominator/lib/tags"
 	proto "github.com/Cloud-Foundations/Dominator/proto/hypervisor"
+)
+
+const (
+	AllocationRequestError         = AllocationDeletionReason(0)
+	AllocationRequestCompleted     = AllocationDeletionReason(1)
+	AllocationRequestCancelled     = AllocationDeletionReason(2)
+	AllocationRequestCannotFit     = AllocationDeletionReason(3)
+	AllocationRequestExpired       = AllocationDeletionReason(4)
+	AllocationRequestCreateTimeout = AllocationDeletionReason(5)
 )
 
 type ChangeMachineTagsRequest struct {
@@ -171,4 +181,46 @@ type PowerOnMachineRequest struct {
 
 type PowerOnMachineResponse struct {
 	Error string
+}
+
+// The Allocation RPC is experimental and subject to change without notice.
+type AllocateRequest struct {
+	Deadline time.Time
+	// Placement
+	// Priority uint
+	VMs []VmAllocationSpecification
+}
+
+type AllocateResponse struct {
+	Error          string
+	RequestId      RequestId
+	UpdatePosition uint64
+}
+
+// The CancelAllocation RPC is experimental and subject to change without
+// notice.
+type CancelAllocationRequest struct {
+	RequestId RequestId
+}
+
+type CancelAllocationResponse struct {
+	Error string
+}
+
+// The GetAllocationUpdates() RPC is fully streamed.
+// The client sends a single GetAllocationUpdatesRequest message.
+// The server sends a stream of AllocationUpdate messages.
+// This RPC is experimental and subject to change without notice.
+
+type GetAllocationUpdatesRequest struct {
+	IncludeRequests bool      // If true: include original allocation requests.
+	Position        uint64    // The position of the first update to receive.
+	MaxUpdates      uint64    // Zero means infinite.
+	UntilRequestId  RequestId // Empty means infinite.
+}
+
+type AllocationUpdate struct {
+	AllocationUpdateEntry
+	Error    string `json:",omitempty"`
+	Position uint64
 }

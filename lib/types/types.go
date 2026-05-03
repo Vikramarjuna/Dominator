@@ -6,4 +6,5 @@ type (
 	Hostname   string
 	Percentage uint16
 	UserId     uint
+	Username   string
 )
