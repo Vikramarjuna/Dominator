@@ -3,9 +3,11 @@ package srpc
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/Cloud-Foundations/Dominator/lib/format"
 	"github.com/Cloud-Foundations/tricorder/go/tricorder"
 	"github.com/Cloud-Foundations/tricorder/go/tricorder/units"
 )
@@ -64,4 +66,41 @@ func setupCertExpirationMetric(once sync.Once, tlsConfig **tls.Config,
 			units.None,
 			"activation time of the certificate which will expire the soonest")
 	})
+}
+
+// validateTlsConfig validates a TLS configuration just prior to use.
+func validateTlsConfig(config *tls.Config) error {
+	if config == nil {
+		return nil
+	}
+	if len(config.Certificates) < 1 {
+		return fmt.Errorf("no certificates in TLS configuration")
+	}
+	now := time.Now()
+	var err error
+	for _, tlsCert := range config.Certificates {
+		if tlsCert.Leaf == nil {
+			continue
+		}
+		if e := validateX509Certificate(now, tlsCert.Leaf); e == nil {
+			return nil
+		} else if err == nil {
+			err = e
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("no valid certificates: %s", err)
+	}
+	return nil
+}
+
+// validateX509Certificate validates a certificate just prior to use.
+func validateX509Certificate(now time.Time, cert *x509.Certificate) error {
+	if notYet := cert.NotBefore.Sub(now); notYet > 0 {
+		return fmt.Errorf("will not be valid for %s", format.Duration(notYet))
+	}
+	if expired := now.Sub(cert.NotAfter); expired > 0 {
+		return fmt.Errorf("expired %s ago", format.Duration(expired))
+	}
+	return nil
 }
