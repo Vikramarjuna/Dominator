@@ -83,6 +83,11 @@ func main() {
 	if err := setupserver.SetupTlsWithParams(params); err != nil {
 		logger.Fatalln(err)
 	}
+	objectServerMetricsDir, err := tricorder.RegisterDirectory(
+		"/imageserver/objectserver")
+	if err != nil {
+		logger.Fatalln(err)
+	}
 	objSrv, err := filesystem.NewObjectServerWithConfigAndParams(
 		filesystem.Config{
 			BaseDirectory:     *objectDir,
@@ -90,7 +95,8 @@ func main() {
 			LockLogTimeout:    *lockLogTimeout,
 		},
 		filesystem.Params{
-			Logger: logger,
+			Logger:           logger,
+			MetricsDirectory: objectServerMetricsDir,
 		})
 	if err != nil {
 		logger.Fatalf("Cannot create ObjectServer: %s\n", err)
