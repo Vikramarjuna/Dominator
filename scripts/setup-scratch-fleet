@@ -1,0 +1,195 @@
+#! /bin/bash --posix
+
+# setup-scratch-fleet: Set up an isolated fleet-manager + hypervisor on the
+#                      local host for testing scratch-built images end to end.
+#
+# Usage: setup-scratch-fleet command [args]
+# Commands:
+#   setup                First-time setup and start.
+#   start                Start network + services (after stop or reboot).
+#   stop                 Stop services and tear down the network.
+#   restart              Stop and start.
+#   status               Show which services are running.
+#   env                  Print shell aliases (sf-vm, sf-hyper).
+#   create-vm stream [name]
+#                        Create a VM from a scratch imageserver stream.
+#   destroy-vm ipAddr    Destroy a VM by IP address.
+#   teardown             Stop, remove the bridge and all state.
+#
+# Environment variables (defaults shown):
+#   SCRATCH_DIR        (default: ~/scratch-fleet)
+#   IMAGINATOR_DIR     (default: ~/scratch-imaginator) — source of the CA,
+#                      client cert dir and the scratch imageserver.
+#   HYPERVISOR_PORT    (default: 6976)
+#   FLEET_MANAGER_PORT (default: 6977)
+#   IMAGESERVER_PORT   (default: 26971) — scratch imageserver to pull from.
+
+set -eu
+
+SCRATCH_DIR="${SCRATCH_DIR:-$HOME/scratch-fleet}"
+IMAGINATOR_DIR="${IMAGINATOR_DIR:-$HOME/scratch-imaginator}"
+HYPERVISOR_PORT="${HYPERVISOR_PORT:-6976}"
+FLEET_MANAGER_PORT="${FLEET_MANAGER_PORT:-6977}"
+IMAGESERVER_PORT="${IMAGESERVER_PORT:-26971}"
+
+# Network constants. VLAN id 66 marks br-scratch for the hypervisor and keeps
+# it distinct from docker0.
+readonly BRIDGE=br-scratch
+readonly DUMMY=sdummy0
+readonly VLAN_ID=66
+readonly SUBNET_ID=scratch
+readonly GATEWAY=192.168.66.1
+readonly NETMASK=255.255.255.0
+readonly POOL_PREFIX=192.168.66
+readonly POOL_FIRST=10
+readonly POOL_LAST=59
+
+readonly STATE_FILE="$SCRATCH_DIR/etc/scratch.env"
+readonly CA_PEM="$IMAGINATOR_DIR/tls/ca.pem"
+readonly CA_KEY="$IMAGINATOR_DIR/tls/ca.key"
+readonly CLIENT_DIR="$IMAGINATOR_DIR/tls/client-dir"
+
+die () {
+    echo "$1" >&2
+    exit 1
+}
+
+need_tool () {
+    command -v "$1" > /dev/null 2>&1 || die "'$1' not found in PATH ($2)"
+}
+
+check_prereqs () {
+    need_tool ip      "install: sudo apt-get install -y iproute2"
+    need_tool ebtables "install: sudo apt-get install -y ebtables"
+    need_tool openssl "install: sudo apt-get install -y openssl"
+    need_tool qemu-system-x86_64 "install: sudo apt-get install -y qemu-system-x86"
+    need_tool sudo    "sudo is required (hypervisor manipulates bridges and namespaces)"
+    [ -f "$CA_PEM" ] && [ -f "$CA_KEY" ] || \
+        die "scratch-imaginator CA not found at $CA_PEM — run setup-scratch-imaginator first"
+    [ -f "$CLIENT_DIR/cert.pem" ] || \
+        die "scratch-imaginator client cert not found at $CLIENT_DIR — run setup-scratch-imaginator first"
+    [ -e /dev/kvm ] || die "/dev/kvm not present — KVM is required to boot VMs"
+}
+
+load_state () {
+    # shellcheck disable=SC1090
+    [ -f "$STATE_FILE" ] && . "$STATE_FILE"
+    return 0
+}
+
+save_state () {
+    cat > "$STATE_FILE" <<EOF
+HYPERVISOR_PORT="$HYPERVISOR_PORT"
+FLEET_MANAGER_PORT="$FLEET_MANAGER_PORT"
+IMAGESERVER_PORT="$IMAGESERVER_PORT"
+IMAGINATOR_DIR="$IMAGINATOR_DIR"
+EOF
+}
+
+main () {
+    [ $# -ge 1 ] || die "usage: $0 command [args]"
+    local cmd="$1"; shift
+    case "$cmd" in
+        setup)      cmd_setup "$@" ;;
+        start)      cmd_start "$@" ;;
+        stop)       cmd_stop "$@" ;;
+        restart)    cmd_stop; cmd_start ;;
+        status)     cmd_status "$@" ;;
+        env)        cmd_env "$@" ;;
+        create-vm)  cmd_create_vm "$@" ;;
+        destroy-vm) cmd_destroy_vm "$@" ;;
+        teardown)   cmd_teardown "$@" ;;
+        *)          die "unknown command: $cmd" ;;
+    esac
+}
+
+make_dirs () {
+    mkdir -p \
+        "$SCRATCH_DIR/bin" \
+        "$SCRATCH_DIR/tls" \
+        "$SCRATCH_DIR/etc/topology/$SUBNET_ID" \
+        "$SCRATCH_DIR/var/lib/hypervisor" \
+        "$SCRATCH_DIR/var/lib/fleet-manager" \
+        "$SCRATCH_DIR/var/log/hypervisor" \
+        "$SCRATCH_DIR/var/log/fleet-manager"
+}
+
+# Provide the four binaries in bin/. Preference order: (1) binaries already
+# present in bin/ (e.g. cross-compiled elsewhere and copied in — the dev VM
+# has no go toolchain); (2) go install from the Dominator checkout this script
+# lives in; (3) copy from ~/go/bin.
+build_binaries () {
+    local have_all=1 b
+    for b in hypervisor fleet-manager vm-control hyper-control; do
+        [ -x "$SCRATCH_DIR/bin/$b" ] || have_all=0
+    done
+    if [ "$have_all" = 1 ]; then
+        echo "[=] binaries already present in bin/; using them"
+        return
+    fi
+    local repo
+    repo="$(cd "$(dirname "$0")/.." 2> /dev/null && pwd)" || repo=""
+    if [ -n "$repo" ] && [ -f "$repo/go.mod" ] && command -v go > /dev/null 2>&1
+    then
+        echo "[+] building hypervisor, fleet-manager, vm-control, hyper-control"
+        ( cd "$repo" && GOBIN="$SCRATCH_DIR/bin" go install \
+            ./cmd/hypervisor ./cmd/fleet-manager \
+            ./cmd/vm-control ./cmd/hyper-control )
+    else
+        echo "[=] not a Dominator checkout (or go missing); copying from ~/go/bin"
+        local b
+        for b in hypervisor fleet-manager vm-control hyper-control; do
+            [ -x "$HOME/go/bin/$b" ] || die "$HOME/go/bin/$b missing; build it first"
+            cp "$HOME/go/bin/$b" "$SCRATCH_DIR/bin/$b"
+        done
+    fi
+    local b
+    for b in hypervisor fleet-manager vm-control hyper-control; do
+        [ -x "$SCRATCH_DIR/bin/$b" ] || die "failed to provide $SCRATCH_DIR/bin/$b"
+    done
+}
+
+# Mint hypervisor and fleet-manager server certs signed by the scratch
+# imaginator CA. The cert CN is the srpc "user"; server_exts grants serverAuth
+# (they are servers) and clientAuth (the hypervisor is a client of the
+# imageserver, the fleet-manager is a client of the hypervisor). The client
+# cert for vm-control/hyper-control is reused from the imaginator stack.
+gen_certs () {
+    local tls="$SCRATCH_DIR/tls"
+    if [ -f "$tls/hypervisor.cert" ] && [ -f "$tls/fleet-manager.cert" ]; then
+        echo "[=] fleet TLS certificates already exist; skipping generation"
+        return
+    fi
+    echo "[+] minting hypervisor and fleet-manager certs from the imaginator CA"
+    cat > "$tls/openssl.cnf" <<'EOF'
+[req]
+distinguished_name = dn
+[dn]
+[server_exts]
+subjectAltName = DNS:localhost, IP:127.0.0.1
+extendedKeyUsage = serverAuth, clientAuth
+EOF
+    _issue () {
+        openssl req -new -nodes -newkey rsa:2048 -batch \
+            -subj "/CN=$2" -keyout "$tls/$1.key" -out "$tls/$1.csr" 2> /dev/null
+        openssl x509 -req -in "$tls/$1.csr" \
+            -CA "$CA_PEM" -CAkey "$CA_KEY" -CAcreateserial \
+            -days 30 -extfile "$tls/openssl.cnf" -extensions server_exts \
+            -out "$tls/$1.cert" 2> /dev/null
+        rm -f "$tls/$1.csr"
+        chmod 600 "$tls/$1.key"
+    }
+    _issue hypervisor    hypervisor-scratch
+    _issue fleet-manager fleet-manager-scratch
+}
+
+cmd_setup () { echo "TODO"; }
+cmd_start () { echo "TODO"; }
+cmd_stop () { echo "TODO"; }
+cmd_status () { echo "TODO"; }
+cmd_env () { echo "TODO"; }
+cmd_create_vm () { echo "TODO"; }
+cmd_destroy_vm () { echo "TODO"; }
+cmd_teardown () { echo "TODO"; }
+
+main "$@"
