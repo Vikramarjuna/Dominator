@@ -241,6 +241,30 @@ stop_hypervisor () {
     return 0
 }
 
+# Wrapper around hyper-control using the reused scratch client cert.
+hyper_ctl () {
+    SSL_CERT_FILE="$CA_PEM" "$SCRATCH_DIR/bin/hyper-control" \
+        -certDirectory="$CLIENT_DIR" \
+        -hypervisorHostname=localhost -hypervisorPortNum="$HYPERVISOR_PORT" \
+        "$@"
+}
+
+# Define the subnet on the hypervisor and seed the address pool. This is the
+# reliable path to end-to-end boot and does not need the fleet-manager. The
+# fleet-manager (Task 6) later takes over replenishment from the topology.
+bootstrap_pool () {
+    echo "[+] adding subnet $SUBNET_ID ($GATEWAY/$NETMASK) to the hypervisor"
+    local ns
+    ns="$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf)"
+    [ -n "$ns" ] || ns="$GATEWAY"
+    hyper_ctl add-subnet "$SUBNET_ID" "$GATEWAY" "$NETMASK" "$ns" || true
+    echo "[+] seeding address pool $POOL_PREFIX.$POOL_FIRST-$POOL_LAST"
+    local i
+    for i in $(seq "$POOL_FIRST" "$POOL_LAST"); do
+        hyper_ctl add-address "" "$POOL_PREFIX.$i" > /dev/null 2>&1 || true
+    done
+}
+
 # Temporary stub; replaced in Task 6 with the real fleet-manager pid lookup.
 pid_fleet_manager () { true; }
 
@@ -250,6 +274,7 @@ cmd_start () {
     load_state
     net_up
     start_hypervisor
+    bootstrap_pool
     echo
     cmd_status
 }
