@@ -33,8 +33,9 @@
 #     non-cloud hosts with "error getting master configuration: 404".
 #   * Directories referenced by BindMounts in the source conf.json must
 #     exist on the host or every build fails on `mount --bind`. The scratch
-#     conf.json empties BindMounts by default; re-enable entries only after
-#     creating the directories (or empty stubs) they point at.
+#     conf.json keeps only entries whose source directory exists at setup
+#     time. Create (or symlink) any path you want available in build chroots
+#     before running setup, or re-run setup after populating it.
 
 set -eu
 
@@ -225,7 +226,7 @@ prepare_config () {
 
     # Strip production-only sections from conf.json.
     python3 - "$SCRATCH_DIR/etc/conf.json" <<'PY'
-import json, pathlib, sys
+import json, os, pathlib, sys
 p = pathlib.Path(sys.argv[1])
 d = json.loads(p.read_text())
 
@@ -238,9 +239,9 @@ d.pop("Cache", None)
 # Auto-rebuild of production streams — off for scratch.
 d["ImageStreamsToAutoRebuild"] = []
 
-# BindMounts sources may be absent on this host; caller can restore
-# individual entries once the corresponding directories are populated.
-d["BindMounts"] = []
+# Keep only BindMounts whose source directory exists on this host, so
+# imaginator does not error at build time trying to mount a missing path.
+d["BindMounts"] = [b for b in d.get("BindMounts", []) if os.path.isdir(b)]
 p.write_text(json.dumps(d, indent=4))
 PY
 }
