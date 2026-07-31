@@ -11,6 +11,9 @@
 #   restart               Stop and start.
 #   status                Show which services are running.
 #   env                   Print shell aliases (sb-build, sb-image).
+#   pull-image name src   Copy a live image from imageserver 'src' into the
+#                         scratch imageserver as a build source (name may be a
+#                         stream directory; the latest image in it is pulled).
 #   teardown              Stop and remove all state.
 #
 # Environment variables (defaults shown):
@@ -42,6 +45,11 @@
 #     symlinks /n/binaries at that tree (set SKIP_BIND_BINARIES=1 to skip).
 #     Drop any other artifact a build needs into the matching subdir, e.g.
 #         cp mycomponent.tar.gz $SCRATCH_DIR/host-binaries/mycomponent/
+#   * To skip rebuilding lower layers (and the slow OS bootstrap), pull a
+#     prebuilt layer from another imageserver as a build source, e.g.
+#         setup-scratch-imaginator pull-image bootstrap/Ubuntu-24/amd64 \
+#             imageserver.example.com:6971
+#     imaginator rebuilds only the layers above it from your manifests.
 
 set -eu
 
@@ -440,6 +448,51 @@ alias sb-image="imagetool -certDirectory=$SCRATCH_DIR/tls/client-dir -imageServe
 EOF
 }
 
+# Copy a live image from another imageserver into the scratch imageserver so
+# imaginator can use it as a build source, skipping the layers below it. Uses
+# tar|add rather than save/restore-from-file, which refuses images whose
+# expiration is still in the future (bootstrap and base layers always have
+# one). If image-name is a stream directory, its most recent image is pulled.
+cmd_pull_image () {
+    [ $# -eq 2 ] \
+        || die "usage: $0 pull-image image-name source-imageserver[:port]"
+    need_tool imagetool "build Dominator and put imagetool on PATH"
+    load_state
+    local image="$1" src="$2" host port
+    host="${src%%:*}"
+    port="${src##*:}"
+    [ "$port" = "$src" ] && port=6971
+    local src_args="-imageServerHostname=$host -imageServerPortNum=$port"
+    src_args="$src_args -certDirectory=${SRC_CERT_DIR:-$HOME/.ssl}"
+    # A stream directory has children in the listing; a full image name does
+    # not. Resolve the former to its most recent image.
+    local latest
+    latest="$(imagetool $src_args list 2> /dev/null \
+        | grep -E "^$image/" | sort | tail -1)"
+    if [ -n "$latest" ]; then
+        echo "[=] resolved to latest: $latest"
+        image="$latest"
+    fi
+    # add detects a tarball by its .tar extension, so name it explicitly.
+    local tmpdir tar filt
+    tmpdir="$(mktemp -d)"
+    tar="$tmpdir/image.tar"
+    filt="$tmpdir/image.filter"
+    echo "[+] exporting $image from $src"
+    imagetool $src_args tar "$image" "$tar"
+    if ! imagetool $src_args show-filter "$image" > "$filt" 2> /dev/null; then
+        : > "$filt"
+    fi
+    echo "[+] importing $image into scratch imageserver on :$IMAGESERVER_PORT"
+    SSL_CERT_FILE="$SCRATCH_DIR/tls/ca.pem" imagetool \
+        -masterImageServerHostname=localhost \
+        -imageServerHostname=localhost -imageServerPortNum="$IMAGESERVER_PORT" \
+        -certDirectory="$SCRATCH_DIR/tls/client-dir" \
+        add "$image" "$tar" "$filt" ""
+    rm -rf "$tmpdir"
+    echo "[+] pulled $image"
+}
+
 cmd_teardown () {
     load_state
     cmd_stop
@@ -469,7 +522,7 @@ cmd_teardown () {
 }
 
 usage () {
-    sed -n '3,44p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,52p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
 }
 
@@ -480,6 +533,7 @@ case "${1:-help}" in
     restart)  cmd_restart ;;
     status)   cmd_status ;;
     env)      cmd_env ;;
+    pull-image) shift; cmd_pull_image "$@" ;;
     teardown) cmd_teardown ;;
     help|-h|--help) usage ;;
     *)        echo "Unknown command: $1" >&2; usage ;;
