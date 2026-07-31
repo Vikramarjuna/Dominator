@@ -32,12 +32,11 @@ HYPERVISOR_PORT="${HYPERVISOR_PORT:-6976}"
 FLEET_MANAGER_PORT="${FLEET_MANAGER_PORT:-6977}"
 IMAGESERVER_PORT="${IMAGESERVER_PORT:-26971}"
 
-# Network constants. VLAN id 66 marks br-scratch for the hypervisor and keeps
-# it distinct from docker0.
-readonly BRIDGE=br-scratch
-readonly DUMMY=sdummy0
-readonly VLAN_ID=66
+# Network constants. The bridge is named br@<subnetId> so the hypervisor's
+# getBridgeForSubnet binds the subnet to it by name, before any VlanId lookup.
+# This needs no VLAN uplink and avoids docker0 (which occupies VlanId 0).
 readonly SUBNET_ID=scratch
+readonly BRIDGE="br@$SUBNET_ID"
 readonly GATEWAY=192.168.66.1
 readonly NETMASK=255.255.255.0
 readonly POOL_PREFIX=192.168.66
@@ -187,30 +186,24 @@ EOF
     _issue fleet-manager fleet-manager-scratch
 }
 
-# Bring up a host-only bridge with a VLAN-tagged dummy uplink. The hypervisor
-# ignores a bridge that has no non-tap enslaved port carrying a VLAN id when
-# other bridges (docker0) exist, so sdummy0.VLAN_ID acts as a VLAN-id marker.
-# No physical NIC and no NAT: VMs are reachable from this host only.
+# Bring up a host-only bridge named br@<subnetId>. The hypervisor's
+# getBridgeForSubnet binds subnet Id "scratch" to a bridge literally named
+# "br@scratch" by name (before any VlanId lookup), so no VLAN uplink or dummy
+# is needed and docker0 (which occupies VlanId 0) is never chosen. No physical
+# NIC and no NAT: VMs are reachable from this host only.
 net_up () {
     if ip link show "$BRIDGE" > /dev/null 2>&1; then
         echo "[=] bridge $BRIDGE already present"
         return
     fi
-    echo "[+] creating host-only bridge $BRIDGE (VLAN $VLAN_ID, sudo)"
+    echo "[+] creating host-only bridge $BRIDGE (sudo)"
     sudo ip link add "$BRIDGE" type bridge
-    sudo ip link add "$DUMMY" type dummy
-    sudo ip link add link "$DUMMY" name "$DUMMY.$VLAN_ID" type vlan id "$VLAN_ID"
-    sudo ip link set "$DUMMY.$VLAN_ID" master "$BRIDGE"
-    sudo ip link set "$DUMMY" up
-    sudo ip link set "$DUMMY.$VLAN_ID" up
     sudo ip link set "$BRIDGE" up
     sudo ip addr add "$GATEWAY/24" dev "$BRIDGE"
 }
 
 net_down () {
-    echo "[-] removing bridge $BRIDGE and dummy uplink (sudo)"
-    sudo ip link del "$DUMMY.$VLAN_ID" 2> /dev/null || true
-    sudo ip link del "$DUMMY" 2> /dev/null || true
+    echo "[-] removing bridge $BRIDGE (sudo)"
     sudo ip link del "$BRIDGE" 2> /dev/null || true
 }
 
