@@ -36,6 +36,12 @@
 #     conf.json keeps only entries whose source directory exists at setup
 #     time. Create (or symlink) any path you want available in build chroots
 #     before running setup, or re-run setup after populating it.
+#   * Image manifests install extra binaries from a /n/binaries tree
+#     (the Dominator tools plus other components). setup builds the
+#     Dominator toolchain into $SCRATCH_DIR/host-binaries/Dominator/ and
+#     symlinks /n/binaries at that tree (set SKIP_BIND_BINARIES=1 to skip).
+#     Drop any other artifact a build needs into the matching subdir, e.g.
+#         cp mycomponent.tar.gz $SCRATCH_DIR/host-binaries/mycomponent/
 
 set -eu
 
@@ -132,6 +138,53 @@ check_binaries () {
             die "$SCRATCH_DIR/bin/$bin not found — build from source (see user-guide/getting-started.md) or copy the binary into place, then re-run."
         fi
     done
+}
+
+# Populate $SCRATCH_DIR/host-binaries with the artifacts image manifests
+# install from /n/binaries. The Dominator command-line tools are built from
+# this checkout (matching what your image-manifest install scripts copy into
+# built images); other components you need are left as
+# empty subdirs for the caller to drop tarballs into. See link_host_binaries.
+build_host_binaries () {
+    local tree="$SCRATCH_DIR/host-binaries"
+    mkdir -p "$tree/Dominator" "$tree/misc"
+    local repo
+    repo="$(cd "$(dirname "$0")/.." 2> /dev/null && pwd)" || repo=""
+    if [ -n "$repo" ] && [ -f "$repo/go.mod" ] && command -v go > /dev/null 2>&1
+    then
+        echo "[+] building Dominator toolchain into host-binaries/Dominator"
+        ( cd "$repo" && GOBIN="$tree/Dominator" go install \
+            ./cmd/builder-tool ./cmd/domtool ./cmd/imagetool \
+            ./cmd/subtool ./cmd/vm-control )
+    else
+        echo "[=] not run from a Dominator checkout (or go missing);"
+        echo "    populate $tree/Dominator/ yourself (e.g. copy from ~/go/bin)."
+    fi
+}
+
+# Symlink /n/binaries at the host-binaries tree so imaginator can bind-mount
+# it into build chroots. prepare_config then keeps the BindMount because the
+# path exists. Set SKIP_BIND_BINARIES=1 to leave /n/ untouched.
+link_host_binaries () {
+    if [ -n "${SKIP_BIND_BINARIES:-}" ]; then
+        echo "[=] SKIP_BIND_BINARIES set; not symlinking /n/binaries"
+        return
+    fi
+    local tree="$SCRATCH_DIR/host-binaries"
+    # ln -sfn would nest the link inside a pre-existing real directory, so
+    # clear an empty /n/binaries first; refuse if it is populated (it may be
+    # a real mount we must not clobber).
+    if [ -e /n/binaries ] && [ ! -L /n/binaries ]; then
+        local contents
+        contents="$(ls -A /n/binaries 2> /dev/null)"
+        if [ -d /n/binaries ] && [ -z "$contents" ]; then
+            sudo rmdir /n/binaries
+        else
+            die "/n/binaries exists and is not our symlink; move it aside first"
+        fi
+    fi
+    echo "[+] linking /n/binaries -> $tree (sudo)"
+    sudo ln -sfn "$tree" /n/binaries
 }
 
 gen_certs () {
@@ -320,6 +373,8 @@ cmd_setup () {
     check_prereqs
     make_dirs
     check_binaries
+    build_host_binaries
+    link_host_binaries
     gen_certs
     install_symlinks
     prepare_config
@@ -404,12 +459,17 @@ cmd_teardown () {
         done
         sudo rmdir /etc/imaginator 2> /dev/null || true
     fi
+    # Remove the /n/binaries symlink if it points into our scratch tree.
+    if [ -L /n/binaries ] && \
+        [ "$(readlink /n/binaries)" = "$SCRATCH_DIR/host-binaries" ]; then
+        sudo rm -f /n/binaries
+    fi
     sudo rm -rf "$SCRATCH_DIR"
     echo "Removed $SCRATCH_DIR and installed symlinks."
 }
 
 usage () {
-    sed -n '3,37p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,44p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
 }
 
