@@ -156,6 +156,10 @@ build_binaries () {
 # cert for vm-control/hyper-control is reused from the imaginator stack.
 gen_certs () {
     local tls="$SCRATCH_DIR/tls"
+    # The hypervisor run script needs the CA under $SCRATCH_DIR (no absolute
+    # imaginator path), so keep a copy current regardless of whether the
+    # server certs below still need minting.
+    cp "$CA_PEM" "$tls/ca-copy.pem"
     if [ -f "$tls/hypervisor.cert" ] && [ -f "$tls/fleet-manager.cert" ]; then
         echo "[=] fleet TLS certificates already exist; skipping generation"
         return
@@ -210,10 +214,64 @@ net_down () {
     sudo ip link del "$BRIDGE" 2> /dev/null || true
 }
 
+pid_hypervisor () {
+    pgrep -f "bin/hypervisor -portNum=${HYPERVISOR_PORT}" 2> /dev/null || true
+}
+
+start_hypervisor () {
+    [ -n "$(pid_hypervisor)" ] && { echo "[=] hypervisor already running"; return; }
+    local run="$SCRATCH_DIR/bin/run-hypervisor"
+    cat > "$run" <<EOF
+#! /bin/bash --posix
+cd "$SCRATCH_DIR"
+exec ./bin/hypervisor \\
+    -portNum=$HYPERVISOR_PORT \\
+    -imageServerHostname=localhost -imageServerPortNum=$IMAGESERVER_PORT \\
+    -CAfile=./tls/ca-copy.pem -identityCAfile=./tls/ca-copy.pem \\
+    -certFile=./tls/hypervisor.cert -keyFile=./tls/hypervisor.key \\
+    -stateDir=./var/lib/hypervisor \\
+    -logDir=./var/log/hypervisor \\
+    -srpcTrustedUsers=$USER,fleet-manager-scratch \\
+    -alsoLogToStderr
+EOF
+    chmod +x "$run"
+    echo "[+] starting hypervisor (sudo) on :$HYPERVISOR_PORT"
+    sudo -b setsid "$run" </dev/null \
+        >> "$SCRATCH_DIR/var/log/hypervisor.stdout" 2>&1
+    sleep 4
+}
+
+stop_hypervisor () {
+    local pid
+    pid=$(pid_hypervisor)
+    [ -n "$pid" ] && { echo "[-] stopping hypervisor (sudo)"; sudo kill "$pid" 2> /dev/null || true; }
+    return 0
+}
+
+# Temporary stub; replaced in Task 6 with the real fleet-manager pid lookup.
+pid_fleet_manager () { true; }
+
 cmd_setup () { echo "TODO"; }
-cmd_start () { echo "TODO"; }
+
+cmd_start () {
+    load_state
+    net_up
+    start_hypervisor
+    echo
+    cmd_status
+}
+
 cmd_stop () { echo "TODO"; }
-cmd_status () { echo "TODO"; }
+
+cmd_status () {
+    load_state
+    local pid
+    pid=$(pid_hypervisor)
+    [ -n "$pid" ] && echo "hypervisor: running (pid=$pid)" || echo "hypervisor: stopped"
+    pid=$(pid_fleet_manager 2> /dev/null || true)
+    [ -n "$pid" ] && echo "fleet-manager: running (pid=$pid)" || echo "fleet-manager: stopped"
+}
+
 cmd_env () { echo "TODO"; }
 cmd_create_vm () { echo "TODO"; }
 cmd_destroy_vm () { echo "TODO"; }
