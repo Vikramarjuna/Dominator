@@ -214,6 +214,13 @@ pid_hypervisor () {
 start_hypervisor () {
     [ -n "$(pid_hypervisor)" ] && { echo "[=] hypervisor already running"; return; }
     local run="$SCRATCH_DIR/bin/run-hypervisor"
+    # stateDir and logDir MUST be absolute. The hypervisor derives the QEMU
+    # -pidfile and serial/monitor socket paths from stateDir, and QEMU is
+    # started with -chroot into the VM's volume logs directory. A relative
+    # stateDir makes those paths resolve inside the chroot (which lacks them),
+    # so QEMU fails with "cannot create PID file: No such file or directory".
+    # $SCRATCH_DIR is expanded here at generation time, giving a literal
+    # absolute path that also survives running under sudo (where $HOME=/root).
     cat > "$run" <<EOF
 #! /bin/bash --posix
 cd "$SCRATCH_DIR"
@@ -222,8 +229,8 @@ exec ./bin/hypervisor \\
     -imageServerHostname=localhost -imageServerPortNum=$IMAGESERVER_PORT \\
     -CAfile=./tls/ca-copy.pem -identityCAfile=./tls/ca-copy.pem \\
     -certFile=./tls/hypervisor.cert -keyFile=./tls/hypervisor.key \\
-    -stateDir=./var/lib/hypervisor \\
-    -logDir=./var/log/hypervisor \\
+    -stateDir=$SCRATCH_DIR/var/lib/hypervisor \\
+    -logDir=$SCRATCH_DIR/var/log/hypervisor \\
     -srpcTrustedUsers=$USER,fleet-manager-scratch \\
     -alsoLogToStderr
 EOF
@@ -291,8 +298,36 @@ cmd_status () {
 }
 
 cmd_env () { echo "TODO"; }
-cmd_create_vm () { echo "TODO"; }
-cmd_destroy_vm () { echo "TODO"; }
+
+# Create a VM directly on the local hypervisor from a scratch imageserver
+# stream. The hypervisor fetches and unpacks the image itself, so no image
+# upload is needed. Placement is direct (no fleet-manager) for reliability.
+cmd_create_vm () {
+    [ $# -ge 1 ] || die "usage: $0 create-vm stream[/arch/stamp] [vmHostname]"
+    load_state
+    local stream="$1" name="${2:-scratch-vm}"
+    echo "[+] creating VM '$name' from $stream"
+    SSL_CERT_FILE="$CA_PEM" "$SCRATCH_DIR/bin/vm-control" \
+        -certDirectory="$CLIENT_DIR" \
+        -hypervisorHostname=localhost -hypervisorPortNum="$HYPERVISOR_PORT" \
+        -imageServerHostname=localhost \
+        -imageServerPortNum="$IMAGESERVER_PORT" \
+        -imageName="$stream" \
+        -subnetId="$SUBNET_ID" \
+        -memory=2GiB -milliCPUs=2000 \
+        -vmHostname="$name" \
+        create-vm
+}
+
+cmd_destroy_vm () {
+    [ $# -eq 1 ] || die "usage: $0 destroy-vm ipAddr"
+    load_state
+    SSL_CERT_FILE="$CA_PEM" "$SCRATCH_DIR/bin/vm-control" \
+        -certDirectory="$CLIENT_DIR" \
+        -hypervisorHostname=localhost -hypervisorPortNum="$HYPERVISOR_PORT" \
+        destroy-vm "$1"
+}
+
 cmd_teardown () { echo "TODO"; }
 
 main "$@"
