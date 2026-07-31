@@ -474,21 +474,24 @@ cmd_pull_image () {
         image="$latest"
     fi
     # add detects a tarball by its .tar extension, so name it explicitly.
-    local tmpdir tar filt
+    local tmpdir tar
     tmpdir="$(mktemp -d)"
     tar="$tmpdir/image.tar"
-    filt="$tmpdir/image.filter"
     echo "[+] exporting $image from $src"
     imagetool $src_args tar "$image" "$tar"
-    if ! imagetool $src_args show-filter "$image" > "$filt" 2> /dev/null; then
-        : > "$filt"
-    fi
+    # Import with an EMPTY filter, not the source image's filter: imagetool
+    # add omits the content of filtered (unmanaged) paths such as
+    # /etc/machine-id, but a build source needs the whole tree. A missing
+    # empty /etc/machine-id makes systemd abort first boot ("System cannot
+    # boot: Missing /etc/machine-id and /etc is mounted read-only"), so a VM
+    # built from the pulled layer never gets networking. The image built on
+    # top still gets its own filter from its manifest.
     echo "[+] importing $image into scratch imageserver on :$IMAGESERVER_PORT"
     SSL_CERT_FILE="$SCRATCH_DIR/tls/ca.pem" imagetool \
         -masterImageServerHostname=localhost \
         -imageServerHostname=localhost -imageServerPortNum="$IMAGESERVER_PORT" \
         -certDirectory="$SCRATCH_DIR/tls/client-dir" \
-        add "$image" "$tar" "$filt" ""
+        add "$image" "$tar" "" ""
     rm -rf "$tmpdir"
     echo "[+] pulled $image"
 }
