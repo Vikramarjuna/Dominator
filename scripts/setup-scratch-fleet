@@ -361,6 +361,11 @@ cmd_stop () {
     stop_fleet_manager
     stop_hypervisor
     sleep 2
+    # stop_hypervisor leaves QEMU guests running (the hypervisor re-adopts them
+    # from stateDir on restart), but net_down removes the bridge out from under
+    # their taps. Reap our guests first so none are orphaned. The VM name is its
+    # IP address, so match only VMs on our subnet.
+    sudo pkill -f "qemu-system.*-name ${POOL_PREFIX}\." 2> /dev/null || true
     net_down
     cmd_status
 }
@@ -416,8 +421,10 @@ cmd_destroy_vm () {
 cmd_teardown () {
     load_state
     cmd_stop
-    echo "[-] removing state under $SCRATCH_DIR"
-    rm -rf "$SCRATCH_DIR"
+    echo "[-] removing state under $SCRATCH_DIR (sudo)"
+    # The hypervisor runs as root and creates root-owned VM state under
+    # stateDir, so removal needs sudo (a plain rm would fail on those subdirs).
+    sudo rm -rf "$SCRATCH_DIR"
 }
 
 main "$@"
