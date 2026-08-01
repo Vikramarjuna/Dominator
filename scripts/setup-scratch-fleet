@@ -272,8 +272,61 @@ bootstrap_pool () {
     done
 }
 
-# Temporary stub; replaced in Task 6 with the real fleet-manager pid lookup.
-pid_fleet_manager () { true; }
+# Write the topology tree the fleet-manager reads: one subnet and one
+# machine (the local hypervisor, listed by the hostname its cert is valid
+# for — "localhost" — matching the SAN in gen_certs). VlanId is 0 because
+# the bridge is bound to the subnet by name (br@scratch), not by VLAN.
+write_topology () {
+    local loc="$SCRATCH_DIR/etc/topology/$SUBNET_ID"
+    local ns
+    ns="$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf)"
+    [ -n "$ns" ] || ns="$GATEWAY"
+    cat > "$loc/subnets.json" <<EOF
+[
+    {
+        "Id": "$SUBNET_ID",
+        "IpGateway": "$GATEWAY",
+        "IpMask": "$NETMASK",
+        "DomainNameServers": ["$ns"],
+        "VlanId": 0
+    }
+]
+EOF
+    cat > "$loc/machines.json" <<EOF
+[
+    {
+        "Hostname": "localhost"
+    }
+]
+EOF
+}
+
+pid_fleet_manager () {
+    pgrep -f "bin/fleet-manager -portNum=${FLEET_MANAGER_PORT}" 2> /dev/null || true
+}
+
+start_fleet_manager () {
+    [ -n "$(pid_fleet_manager)" ] && { echo "[=] fleet-manager already running"; return; }
+    echo "[+] starting fleet-manager on :$FLEET_MANAGER_PORT"
+    ( cd "$SCRATCH_DIR" && \
+        nohup ./bin/fleet-manager \
+            -portNum="$FLEET_MANAGER_PORT" \
+            -CAfile=./tls/ca-copy.pem -identityCAfile=./tls/ca-copy.pem \
+            -certFile=./tls/fleet-manager.cert -keyFile=./tls/fleet-manager.key \
+            -stateDir=./var/lib/fleet-manager \
+            -topologyDir=./etc/topology \
+            -srpcTrustedUsers="$USER,hypervisor-scratch" \
+            -alsoLogToStderr \
+            > "$SCRATCH_DIR/var/log/fleet-manager.stdout" 2>&1 & )
+    sleep 3
+}
+
+stop_fleet_manager () {
+    local pid
+    pid=$(pid_fleet_manager)
+    [ -n "$pid" ] && { echo "[-] stopping fleet-manager"; kill "$pid" 2> /dev/null || true; }
+    return 0
+}
 
 cmd_setup () { echo "TODO"; }
 
@@ -282,6 +335,8 @@ cmd_start () {
     net_up
     start_hypervisor
     bootstrap_pool
+    write_topology
+    start_fleet_manager
     echo
     cmd_status
 }
