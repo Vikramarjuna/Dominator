@@ -328,7 +328,22 @@ stop_fleet_manager () {
     return 0
 }
 
-cmd_setup () { echo "TODO"; }
+cmd_setup () {
+    check_prereqs
+    make_dirs
+    build_binaries
+    gen_certs
+    save_state
+    cmd_start
+    cat <<EOF
+
+Setup complete. Load shell aliases with:
+    eval "\$($0 env)"
+
+Create a VM from a scratch stream:
+    $0 create-vm MyStream/Ubuntu-22/amd64 my-vm
+EOF
+}
 
 cmd_start () {
     load_state
@@ -341,7 +356,14 @@ cmd_start () {
     cmd_status
 }
 
-cmd_stop () { echo "TODO"; }
+cmd_stop () {
+    load_state
+    stop_fleet_manager
+    stop_hypervisor
+    sleep 2
+    net_down
+    cmd_status
+}
 
 cmd_status () {
     load_state
@@ -352,7 +374,15 @@ cmd_status () {
     [ -n "$pid" ] && echo "fleet-manager: running (pid=$pid)" || echo "fleet-manager: stopped"
 }
 
-cmd_env () { echo "TODO"; }
+cmd_env () {
+    load_state
+    cat <<EOF
+# eval "\$($0 env)" to activate these in your shell.
+export SSL_CERT_FILE="$CA_PEM"
+alias sf-vm="$SCRATCH_DIR/bin/vm-control -certDirectory=$CLIENT_DIR -fleetManagerHostname=localhost -fleetManagerPortNum=$FLEET_MANAGER_PORT -imageServerHostname=localhost -imageServerPortNum=$IMAGESERVER_PORT"
+alias sf-hyper="$SCRATCH_DIR/bin/hyper-control -certDirectory=$CLIENT_DIR -hypervisorHostname=localhost -hypervisorPortNum=$HYPERVISOR_PORT"
+EOF
+}
 
 # Create a VM directly on the local hypervisor from a scratch imageserver
 # stream. The hypervisor fetches and unpacks the image itself, so no image
@@ -383,6 +413,11 @@ cmd_destroy_vm () {
         destroy-vm "$1"
 }
 
-cmd_teardown () { echo "TODO"; }
+cmd_teardown () {
+    load_state
+    cmd_stop
+    echo "[-] removing state under $SCRATCH_DIR"
+    rm -rf "$SCRATCH_DIR"
+}
 
 main "$@"
