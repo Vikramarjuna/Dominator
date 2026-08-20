@@ -328,11 +328,27 @@ stop_fleet_manager () {
     return 0
 }
 
+# The hypervisor and fleet-manager call the scratch imageserver directly (the
+# hypervisor pulls image objects via ObjectServer.GetObjects), so it must trust
+# their cert CNs. Inject them and restart the imageserver via its own script,
+# which owns the imageserver lifecycle.
+trust_imageserver () {
+    local imaginator
+    imaginator="$(dirname "$0")/setup-scratch-imaginator"
+    [ -x "$imaginator" ] || \
+        die "setup-scratch-imaginator not found beside this script"
+    local extra="hypervisor-scratch,fleet-manager-scratch"
+    echo "[+] trusting hypervisor-scratch,fleet-manager-scratch on imageserver"
+    SCRATCH_DIR="$IMAGINATOR_DIR" IMAGESERVER_EXTRA_TRUSTED_USERS="$extra" \
+        "$imaginator" restart
+}
+
 cmd_setup () {
     check_prereqs
     make_dirs
     build_binaries
     gen_certs
+    trust_imageserver
     save_state
     cmd_start
     cat <<EOF
