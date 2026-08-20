@@ -20,6 +20,10 @@
 #   SCRATCH_DIR         (default: ~/scratch-imaginator)
 #   IMAGINATOR_PORT     (default: 26975)
 #   IMAGESERVER_PORT    (default: 26971)
+#   IMAGESERVER_EXTRA_TRUSTED_USERS
+#                       (default: empty) comma-separated client cert CNs to
+#                       add to the imageserver's trusted users, for other
+#                       services that call it directly.
 #   CERT_DAYS           (default: 30)
 #   CONF_SRC_DIR        (default: auto-detected — either
 #                        $MANIFESTS_DIR/coreinfra/imaginator/files/etc/imaginator
@@ -58,6 +62,7 @@ set -eu
 SCRATCH_DIR="${SCRATCH_DIR:-$HOME/scratch-imaginator}"
 IMAGINATOR_PORT="${IMAGINATOR_PORT:-26975}"
 IMAGESERVER_PORT="${IMAGESERVER_PORT:-26971}"
+IMAGESERVER_EXTRA_TRUSTED_USERS="${IMAGESERVER_EXTRA_TRUSTED_USERS:-}"
 CERT_DAYS="${CERT_DAYS:-30}"
 
 readonly STATE_FILE="$SCRATCH_DIR/etc/scratch.env"
@@ -82,8 +87,13 @@ check_prereqs () {
 }
 
 load_state () {
+    # A non-empty IMAGESERVER_EXTRA_TRUSTED_USERS in the environment overrides
+    # the persisted value, so a caller can inject extra trusted CNs on a
+    # restart (e.g. a service that calls the imageserver directly).
+    local env_extra="$IMAGESERVER_EXTRA_TRUSTED_USERS"
     # shellcheck disable=SC1090
     [ -f "$STATE_FILE" ] && . "$STATE_FILE"
+    [ -n "$env_extra" ] && IMAGESERVER_EXTRA_TRUSTED_USERS="$env_extra"
 }
 
 save_state () {
@@ -92,6 +102,7 @@ MANIFESTS_DIR="$MANIFESTS_DIR"
 CONF_SRC_DIR="$CONF_SRC_DIR"
 IMAGINATOR_PORT="$IMAGINATOR_PORT"
 IMAGESERVER_PORT="$IMAGESERVER_PORT"
+IMAGESERVER_EXTRA_TRUSTED_USERS="$IMAGESERVER_EXTRA_TRUSTED_USERS"
 EOF
 }
 
@@ -320,6 +331,11 @@ pid_imaginator () {
 start_imageserver () {
     [ -n "$(pid_imageserver)" ] && { echo "[=] imageserver already running"; return; }
     echo "[+] starting imageserver on :$IMAGESERVER_PORT"
+    # Base trust: the imaginator build client and the invoking user. Callers
+    # can append more CNs via IMAGESERVER_EXTRA_TRUSTED_USERS.
+    local trusted="imaginator-scratch,$USER"
+    [ -n "$IMAGESERVER_EXTRA_TRUSTED_USERS" ] && \
+        trusted="$trusted,$IMAGESERVER_EXTRA_TRUSTED_USERS"
     (cd "$SCRATCH_DIR" && \
         nohup ./bin/imageserver \
             -portNum="$IMAGESERVER_PORT" \
@@ -328,7 +344,7 @@ start_imageserver () {
             -imageDir=./var/lib/imageserver/images \
             -objectDir=./var/lib/imageserver/objects \
             -logDir=./var/log/imageserver \
-            -srpcTrustedUsers="imaginator-scratch,$USER" \
+            -srpcTrustedUsers="$trusted" \
             -alsoLogToStderr \
             > "$SCRATCH_DIR/var/log/imageserver.stdout" 2>&1 & )
     sleep 2
@@ -421,6 +437,10 @@ cmd_stop () {
 }
 
 cmd_restart () {
+    # Persist any env-injected IMAGESERVER_EXTRA_TRUSTED_USERS so it survives
+    # later restarts.
+    load_state
+    [ -f "$STATE_FILE" ] && save_state
     cmd_stop
     cmd_start
 }
