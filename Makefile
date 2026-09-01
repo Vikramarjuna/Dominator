@@ -1,28 +1,28 @@
 all: generate
-	CGO_ENABLED=0 go install -buildvcs=true ./cmd/*
+	CGO_ENABLED=0 go install ./cmd/*
 	@cd c; make
 	go vet -composites=false ./cmd/*
 
 build-darwin: generate
-	(CGO_ENABLED=0 GOOS=darwin go build -buildvcs=true ./cmd/*)
+	(CGO_ENABLED=0 GOOS=darwin go build ./cmd/*)
 
 build-linux: generate
-	(CGO_ENABLED=0 GOOS=linux go build -buildvcs=true ./cmd/*)
+	(CGO_ENABLED=0 GOOS=linux go build ./cmd/*)
 
 build-windows: generate
-	(CGO_ENABLED=0 GOOS=windows go build -buildvcs=true ./cmd/*)
+	(CGO_ENABLED=0 GOOS=windows go build ./cmd/*)
 
 install-darwin: generate
-	(CGO_ENABLED=0 GOOS=darwin go install -buildvcs=true ./cmd/*)
+	(CGO_ENABLED=0 GOOS=darwin go install ./cmd/*)
 
 install-linux: generate
-	(CGO_ENABLED=0 GOOS=linux go install -buildvcs=true ./cmd/*)
+	(CGO_ENABLED=0 GOOS=linux go install ./cmd/*)
 
 install-linux-arm: generate
-	(CGO_ENABLED=0 GOARCH=arm64 GOOS=linux go install -buildvcs=true ./cmd/*)
+	(CGO_ENABLED=0 GOARCH=arm64 GOOS=linux go install ./cmd/*)
 
 install-windows: generate
-	(CGO_ENABLED=0 GOOS=windows go install -buildvcs=true ./cmd/*)
+	(CGO_ENABLED=0 GOOS=windows go install ./cmd/*)
 
 disruption-manager.tarball: generate
 	@./scripts/make-tarball disruption-manager
@@ -65,8 +65,13 @@ subd.tarball: generate
 
 UPSTREAM_REPO    := https://github.com/Cloud-Foundations/Dominator.git
 BUILD_INFO_FILE  := lib/version/BUILD_INFO
-BUILD_INFO_DEPS  := .git/HEAD .git/logs/HEAD .git/refs/tags \
-                    $(wildcard .git/packed-refs) Makefile
+# Worktree-safe: HEAD and logs live in the per-worktree gitdir;
+# refs/tags and packed-refs live in the shared common dir.
+GIT_DIR          := $(shell git rev-parse --git-dir 2>/dev/null)
+GIT_COMMON_DIR   := $(shell git rev-parse --git-common-dir 2>/dev/null)
+BUILD_INFO_DEPS  := $(GIT_DIR)/HEAD $(GIT_DIR)/logs/HEAD \
+                    $(GIT_COMMON_DIR)/refs/tags \
+                    $(wildcard $(GIT_COMMON_DIR)/packed-refs) Makefile
 
 $(BUILD_INFO_FILE): $(BUILD_INFO_DEPS)
 	@version=$$(git describe --tags --always --match 'v[0-9]*.[0-9]*.[0-9]*'); \
