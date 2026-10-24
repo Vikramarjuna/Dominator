@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
-	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
@@ -13,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 
 	"github.com/Cloud-Foundations/Dominator/hypervisor/dhcpd"
@@ -34,7 +31,6 @@ import (
 	"github.com/Cloud-Foundations/Dominator/lib/srpc"
 	"github.com/Cloud-Foundations/Dominator/lib/srpc/setupserver"
 	"github.com/Cloud-Foundations/Dominator/lib/types"
-	pb "github.com/Cloud-Foundations/Dominator/proto/hypervisor/grpc"
 	"github.com/Cloud-Foundations/tricorder/go/tricorder"
 )
 
@@ -278,24 +274,18 @@ func run() {
 	}
 	go handleSignals(managerObj, logger)
 
-	// Start server (gRPC/REST + HTTP/SRPC on same port).
-	restMiddleware := lib_grpc.NewRestAuthMiddleware(lib_grpc.RestAuthConfig{
-		ServiceName:  "hypervisor.Hypervisor",
-		PathToMethod: rpcd.ExtractMethodFromPath,
-	})
-	config := server.Config{
-		Port:        *portNum,
+	// Start server (gRPC + HTTP/SRPC on same port).
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(lib_grpc.UnaryAuthInterceptor),
+		grpc.StreamInterceptor(lib_grpc.StreamAuthInterceptor),
+	)
+	rpcd.SetupGRPC(grpcServer, rpcConfig, rpcParams)
+	httpd.RegisterHandlers(managerObj)
+	err = server.Start(server.Config{Port: *portNum}, server.Params{
+		GrpcHandler: grpcServer,
 		Logger:      logger,
-		HttpHandler: httpd.NewHandler(managerObj),
-		GrpcHandler: func(grpcServer *grpc.Server, gatewayMux *runtime.ServeMux) (http.Handler, error) {
-			srv := rpcd.SetupGRPC(grpcServer, rpcConfig, rpcParams)
-			if err := pb.RegisterHypervisorHandlerServer(context.Background(), gatewayMux, srv); err != nil {
-				return nil, err
-			}
-			return restMiddleware(gatewayMux), nil
-		},
-	}
-	if err := server.Start(config); err != nil {
+	})
+	if err != nil {
 		logger.Fatalf("Server failed: %s\n", err)
 	}
 }
