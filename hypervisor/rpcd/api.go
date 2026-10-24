@@ -86,7 +86,7 @@ func Setup(config Config, params Params) (*htmlWriter, error) {
 // SetupGRPC registers the Hypervisor gRPC service on server and returns it.
 func SetupGRPC(server *grpc.Server, config Config, params Params) pb.HypervisorServer {
 	methodOptions := getMethodOptions(config)
-	lib_grpc.RegisterServiceOptions("Hypervisor", lib_grpc.ServiceOptions{
+	lib_grpc.RegisterServiceOptions("hypervisor.Hypervisor", lib_grpc.ServiceOptions{
 		PublicMethods:          methodOptions.PublicMethods,
 		UnauthenticatedMethods: methodOptions.UnauthenticatedMethods,
 	})

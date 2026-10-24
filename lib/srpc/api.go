@@ -192,13 +192,6 @@ type Encoder interface {
 	Encode(e interface{}) error
 }
 
-// AuthConn defines the interface for authorization checks.
-type AuthConn interface {
-	GetAuthInformation() *AuthInformation
-	GetPermittedMethods() map[string]struct{}
-	AllowMethodPowers() bool
-}
-
 // StreamingConn defines the interface for a streaming RPC connection.
 type StreamingConn interface {
 	Decoder
@@ -301,11 +294,6 @@ type ClientResource struct {
 func SetDefaultGrantMethod(grantMethod func(serviceMethod string,
 	authInfo *AuthInformation) bool) {
 	defaultGrantMethod = grantMethod
-}
-
-// GetDefaultGrantMethod returns the default grant method for all receivers.
-func GetDefaultGrantMethod() func(serviceMethod string, authInfo *AuthInformation) bool {
-	return defaultGrantMethod
 }
 
 // SetDefaultLogger will override the default logger used.
@@ -577,16 +565,6 @@ func (conn *Conn) RequestReply(request interface{}, reply interface{}) error {
 // connection, then Username will panic.
 func (conn *Conn) Username() string {
 	return conn.getUsername()
-}
-
-// GetPermittedMethods returns the methods permitted by the client certificate.
-func (conn *Conn) GetPermittedMethods() map[string]struct{} {
-	return conn.permittedMethods
-}
-
-// AllowMethodPowers returns true if the client has method powers.
-func (conn *Conn) AllowMethodPowers() bool {
-	return conn.allowMethodPowers
 }
 
 type ReceiverOptions struct {
