@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"strings"
 	"time"
 
@@ -22,6 +23,12 @@ var authInfoKey = authInfoKeyType{}
 
 var publicMethods = make(map[string]struct{})
 var unauthenticatedMethods = make(map[string]struct{})
+
+// chunkReader implements io.Reader over a sequence of chunks.
+type chunkReader struct {
+	buffer []byte // Unread part of the current chunk.
+	next   func() ([]byte, error)
+}
 
 // wrappedStream overrides Context to include auth info.
 type wrappedStream struct {
@@ -173,6 +180,36 @@ func grpcToSrpcMethod(fullMethod string) string {
 	serviceParts := strings.Split(parts[0], ".")
 	serviceName := serviceParts[len(serviceParts)-1]
 	return serviceName + "." + parts[1]
+}
+
+// Read implements io.Reader. It returns the number of bytes copied into p, or
+// the error returned by next, which is io.EOF at the end of the data.
+func (r *chunkReader) Read(p []byte) (int, error) {
+	if len(p) < 1 {
+		return 0, nil
+	}
+	for len(r.buffer) < 1 {
+		chunk, err := r.next()
+		if err != nil {
+			return 0, err
+		}
+		r.buffer = chunk
+	}
+	n := copy(p, r.buffer)
+	r.buffer = r.buffer[n:]
+	return n, nil
+}
+
+// newStreamingConn returns a StreamingConn whose caller is the one recorded in
+// ctx, or an unauthenticated one if ctx carries no AuthInfo.
+func newStreamingConn(ctx context.Context, decode func(v interface{}) error,
+	encode func(v interface{}) error, reader io.Reader) *StreamingConn {
+	return &StreamingConn{
+		authInformation: authInfoFromContext(ctx).getAuthInformation(),
+		decode:          decode,
+		encode:          encode,
+		reader:          reader,
+	}
 }
 
 // Metrics stubs - replaced by metrics.go in a later PR.
