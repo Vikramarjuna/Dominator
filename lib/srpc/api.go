@@ -192,7 +192,9 @@ type Encoder interface {
 	Encode(e interface{}) error
 }
 
-// StreamingConn defines the interface for a streaming RPC connection.
+// StreamingConn is the part of a Conn that streaming method implementations
+// use. It is satisfied by *Conn, and by adapters which serve the same methods
+// over other protocols.
 type StreamingConn interface {
 	Decoder
 	Encoder

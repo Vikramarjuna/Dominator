@@ -11,8 +11,6 @@ import (
 // Generated from proto google.api.http annotations.
 func ExtractMethodFromPath(path, httpMethod string) string {
 	switch {
-	case path == "/v1/vms" && httpMethod == http.MethodPost:
-		return "CreateVm"
 	case strings.HasSuffix(path, ":start") && httpMethod == http.MethodPost:
 		return "StartVm"
 	case strings.HasPrefix(path, "/v1/vms/") && httpMethod == http.MethodDelete:

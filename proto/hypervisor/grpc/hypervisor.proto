@@ -10,28 +10,10 @@ import "google/api/annotations.proto";
 
 // Hypervisor service
 service Hypervisor {
-  // GetHealth returns the health status of the hypervisor.
-  // This is an unauthenticated endpoint for load balancer health checks.
-  rpc GetHealth(GetHealthRequest) returns (GetHealthResponse) {
-    option (google.api.http) = {
-      get: "/v1/health"
-    };
-  }
-
-  // CreateVm creates a VM asynchronously (non-blocking)
-  // Returns immediately with VM in starting state
-  // Client polls GetVm to check completion
-  rpc CreateVm(CreateVmRequest) returns (Vm) {
-    option (google.api.http) = {
-      post: "/v1/vms"
-      body: "vm"
-    };
-  }
-
-  // CreateVmStreaming creates a VM with bidirectional streaming (blocking)
+  // CreateVm creates a VM with bidirectional streaming (blocking)
   // Client sends: initial request, then optionally streams image data
   // Server sends: multiple progress messages until VM is fully created
-  rpc CreateVmStreaming(stream CreateVmStreamingRequest) returns (stream CreateVmStreamingResponse);
+  rpc CreateVm(stream CreateVmStreamingRequest) returns (stream CreateVmStreamingResponse);
 
   // StartVm starts a stopped VM
   rpc StartVm(StartVmRequest) returns (Vm) {
@@ -39,6 +21,10 @@ service Hypervisor {
       post: "/v1/vms/{ip_address}:start"
     };
   }
+
+  // AcknowledgeVm tells the hypervisor to keep a newly created VM. A VM that
+  // is not acknowledged is destroyed after a timeout.
+  rpc AcknowledgeVm(AcknowledgeVmRequest) returns (AcknowledgeVmResponse);
 
   // DestroyVm destroys a VM
   rpc DestroyVm(DestroyVmRequest) returns (DestroyVmResponse) {
@@ -120,6 +106,10 @@ message Vm {
 
   // Input only. Don't start VM after creation
   bool do_not_start = 10;
+
+  // Input only. Subnet to allocate the VM address from. If empty, the
+  // hypervisor chooses a subnet the caller may use.
+  string subnet_id = 11;
 }
 
 // CreateVmRequest for creating a VM
@@ -133,6 +123,15 @@ message StartVmRequest {
   // Required. IP address of the VM to start
   string ip_address = 1;
 }
+
+// AcknowledgeVmRequest for acknowledging a VM
+message AcknowledgeVmRequest {
+  // Required. IP address of the VM to acknowledge
+  string ip_address = 1;
+}
+
+// AcknowledgeVmResponse is empty on success
+message AcknowledgeVmResponse {}
 
 // DestroyVmRequest for destroying a VM
 message DestroyVmRequest {
@@ -186,6 +185,9 @@ message CreateVmStreamingMetadata {
 
   // Size of user data to stream after image data
   uint64 user_data_size = 4;
+
+  // Free space to leave in the root volume, in bytes
+  uint64 minimum_free_bytes = 5;
 }
 
 // CreateVmStreamingResponse contains progress or final result

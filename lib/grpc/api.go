@@ -17,6 +17,7 @@ package grpc
 
 import (
 	"context"
+	"io"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -43,6 +44,15 @@ const DoNotUseMethodPowersMetadataKey = "donotusemethodpowers"
 // AuthInfo holds the caller's authentication information.
 type AuthInfo struct {
 	authInformation *srpc.AuthInformation
+}
+
+// StreamingConn adapts a gRPC stream to srpc.StreamingConn, so a method
+// written against SRPC's streaming connection can also serve gRPC calls.
+type StreamingConn struct {
+	authInformation *srpc.AuthInformation
+	decode          func(v interface{}) error
+	encode          func(v interface{}) error
+	reader          io.Reader
 }
 
 // ServiceOptions configures authorisation for a gRPC service.
@@ -83,4 +93,58 @@ func StreamAuthInterceptor(srv interface{}, ss grpc.ServerStream,
 func UnaryAuthInterceptor(ctx context.Context, req interface{},
 	info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	return unaryAuthInterceptor(ctx, req, info, handler)
+}
+
+// NewChunkReader returns an io.Reader over the chunks returned by next. It
+// returns io.EOF once next does. Empty chunks are skipped and a chunk larger
+// than the caller's buffer is delivered over several Read calls.
+func NewChunkReader(next func() ([]byte, error)) io.Reader {
+	return &chunkReader{next: next}
+}
+
+// NewStreamingConn returns a StreamingConn for the call whose context is ctx.
+// The caller's authentication information is taken from ctx, as set by the
+// auth interceptors. decode fills in the request, and encode sends a reply;
+// both convert between the SRPC and gRPC message types. reader supplies the
+// raw bytes returned by Read and may be nil if the method does not read them.
+func NewStreamingConn(ctx context.Context, decode func(v interface{}) error,
+	encode func(v interface{}) error, reader io.Reader) *StreamingConn {
+	return newStreamingConn(ctx, decode, encode, reader)
+}
+
+// Decode calls the decode function given to NewStreamingConn.
+func (c *StreamingConn) Decode(v interface{}) error {
+	return c.decode(v)
+}
+
+// Encode calls the encode function given to NewStreamingConn.
+func (c *StreamingConn) Encode(v interface{}) error {
+	return c.encode(v)
+}
+
+// Flush does nothing, since gRPC sends each message as soon as it is encoded.
+func (c *StreamingConn) Flush() error {
+	return nil
+}
+
+// GetAuthInformation returns the authentication information or nil.
+func (c *StreamingConn) GetAuthInformation() *srpc.AuthInformation {
+	return c.authInformation
+}
+
+// Peek is not supported. It always returns an UnimplementedError.
+func (c *StreamingConn) Peek(n int) ([]byte, error) {
+	return c.peek(n)
+}
+
+// Read reads from the reader given to NewStreamingConn. It returns an
+// UnimplementedError if there was none.
+func (c *StreamingConn) Read(p []byte) (int, error) {
+	return c.read(p)
+}
+
+// Username returns the caller's username, or the empty string if the caller
+// is unauthenticated.
+func (c *StreamingConn) Username() string {
+	return c.username()
 }

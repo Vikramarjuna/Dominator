@@ -174,7 +174,10 @@ type Vm struct {
 	// VM tags
 	Tags map[string]string `protobuf:"bytes,9,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Input only. Don't start VM after creation
-	DoNotStart    bool `protobuf:"varint,10,opt,name=do_not_start,json=doNotStart,proto3" json:"do_not_start,omitempty"`
+	DoNotStart bool `protobuf:"varint,10,opt,name=do_not_start,json=doNotStart,proto3" json:"do_not_start,omitempty"`
+	// Input only. Subnet to allocate the VM address from. If empty, the
+	// hypervisor chooses a subnet the caller may use.
+	SubnetId      string `protobuf:"bytes,11,opt,name=subnet_id,json=subnetId,proto3" json:"subnet_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -279,6 +282,13 @@ func (x *Vm) GetDoNotStart() bool {
 	return false
 }
 
+func (x *Vm) GetSubnetId() string {
+	if x != nil {
+		return x.SubnetId
+	}
+	return ""
+}
+
 // CreateVmRequest for creating a VM
 type CreateVmRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -371,6 +381,89 @@ func (x *StartVmRequest) GetIpAddress() string {
 	return ""
 }
 
+// AcknowledgeVmRequest for acknowledging a VM
+type AcknowledgeVmRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Required. IP address of the VM to acknowledge
+	IpAddress     string `protobuf:"bytes,1,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcknowledgeVmRequest) Reset() {
+	*x = AcknowledgeVmRequest{}
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcknowledgeVmRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcknowledgeVmRequest) ProtoMessage() {}
+
+func (x *AcknowledgeVmRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcknowledgeVmRequest.ProtoReflect.Descriptor instead.
+func (*AcknowledgeVmRequest) Descriptor() ([]byte, []int) {
+	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *AcknowledgeVmRequest) GetIpAddress() string {
+	if x != nil {
+		return x.IpAddress
+	}
+	return ""
+}
+
+// AcknowledgeVmResponse is empty on success
+type AcknowledgeVmResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcknowledgeVmResponse) Reset() {
+	*x = AcknowledgeVmResponse{}
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcknowledgeVmResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcknowledgeVmResponse) ProtoMessage() {}
+
+func (x *AcknowledgeVmResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcknowledgeVmResponse.ProtoReflect.Descriptor instead.
+func (*AcknowledgeVmResponse) Descriptor() ([]byte, []int) {
+	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{4}
+}
+
 // DestroyVmRequest for destroying a VM
 type DestroyVmRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -382,7 +475,7 @@ type DestroyVmRequest struct {
 
 func (x *DestroyVmRequest) Reset() {
 	*x = DestroyVmRequest{}
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[3]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -394,7 +487,7 @@ func (x *DestroyVmRequest) String() string {
 func (*DestroyVmRequest) ProtoMessage() {}
 
 func (x *DestroyVmRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[3]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -407,7 +500,7 @@ func (x *DestroyVmRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DestroyVmRequest.ProtoReflect.Descriptor instead.
 func (*DestroyVmRequest) Descriptor() ([]byte, []int) {
-	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{3}
+	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DestroyVmRequest) GetIpAddress() string {
@@ -426,7 +519,7 @@ type DestroyVmResponse struct {
 
 func (x *DestroyVmResponse) Reset() {
 	*x = DestroyVmResponse{}
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[4]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -438,7 +531,7 @@ func (x *DestroyVmResponse) String() string {
 func (*DestroyVmResponse) ProtoMessage() {}
 
 func (x *DestroyVmResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[4]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -451,7 +544,7 @@ func (x *DestroyVmResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DestroyVmResponse.ProtoReflect.Descriptor instead.
 func (*DestroyVmResponse) Descriptor() ([]byte, []int) {
-	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{4}
+	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{6}
 }
 
 // ListVmsRequest for listing VMs
@@ -466,7 +559,7 @@ type ListVmsRequest struct {
 
 func (x *ListVmsRequest) Reset() {
 	*x = ListVmsRequest{}
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[5]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -478,7 +571,7 @@ func (x *ListVmsRequest) String() string {
 func (*ListVmsRequest) ProtoMessage() {}
 
 func (x *ListVmsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[5]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -491,7 +584,7 @@ func (x *ListVmsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListVmsRequest.ProtoReflect.Descriptor instead.
 func (*ListVmsRequest) Descriptor() ([]byte, []int) {
-	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{5}
+	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListVmsRequest) GetView() VmView {
@@ -511,7 +604,7 @@ type ListVmsResponse struct {
 
 func (x *ListVmsResponse) Reset() {
 	*x = ListVmsResponse{}
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[6]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -523,7 +616,7 @@ func (x *ListVmsResponse) String() string {
 func (*ListVmsResponse) ProtoMessage() {}
 
 func (x *ListVmsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[6]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -536,7 +629,7 @@ func (x *ListVmsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListVmsResponse.ProtoReflect.Descriptor instead.
 func (*ListVmsResponse) Descriptor() ([]byte, []int) {
-	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{6}
+	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListVmsResponse) GetVms() []*Vm {
@@ -559,7 +652,7 @@ type GetVmRequest struct {
 
 func (x *GetVmRequest) Reset() {
 	*x = GetVmRequest{}
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[7]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -571,7 +664,7 @@ func (x *GetVmRequest) String() string {
 func (*GetVmRequest) ProtoMessage() {}
 
 func (x *GetVmRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[7]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -584,7 +677,7 @@ func (x *GetVmRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetVmRequest.ProtoReflect.Descriptor instead.
 func (*GetVmRequest) Descriptor() ([]byte, []int) {
-	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{7}
+	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetVmRequest) GetIpAddress() string {
@@ -615,7 +708,7 @@ type CreateVmStreamingRequest struct {
 
 func (x *CreateVmStreamingRequest) Reset() {
 	*x = CreateVmStreamingRequest{}
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[8]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -627,7 +720,7 @@ func (x *CreateVmStreamingRequest) String() string {
 func (*CreateVmStreamingRequest) ProtoMessage() {}
 
 func (x *CreateVmStreamingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[8]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -640,7 +733,7 @@ func (x *CreateVmStreamingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateVmStreamingRequest.ProtoReflect.Descriptor instead.
 func (*CreateVmStreamingRequest) Descriptor() ([]byte, []int) {
-	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{8}
+	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CreateVmStreamingRequest) GetRequest() isCreateVmStreamingRequest_Request {
@@ -696,14 +789,16 @@ type CreateVmStreamingMetadata struct {
 	// DHCP timeout duration in nanoseconds
 	DhcpTimeout int64 `protobuf:"varint,3,opt,name=dhcp_timeout,json=dhcpTimeout,proto3" json:"dhcp_timeout,omitempty"`
 	// Size of user data to stream after image data
-	UserDataSize  uint64 `protobuf:"varint,4,opt,name=user_data_size,json=userDataSize,proto3" json:"user_data_size,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	UserDataSize uint64 `protobuf:"varint,4,opt,name=user_data_size,json=userDataSize,proto3" json:"user_data_size,omitempty"`
+	// Free space to leave in the root volume, in bytes
+	MinimumFreeBytes uint64 `protobuf:"varint,5,opt,name=minimum_free_bytes,json=minimumFreeBytes,proto3" json:"minimum_free_bytes,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *CreateVmStreamingMetadata) Reset() {
 	*x = CreateVmStreamingMetadata{}
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[9]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -715,7 +810,7 @@ func (x *CreateVmStreamingMetadata) String() string {
 func (*CreateVmStreamingMetadata) ProtoMessage() {}
 
 func (x *CreateVmStreamingMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[9]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -728,7 +823,7 @@ func (x *CreateVmStreamingMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateVmStreamingMetadata.ProtoReflect.Descriptor instead.
 func (*CreateVmStreamingMetadata) Descriptor() ([]byte, []int) {
-	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{9}
+	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CreateVmStreamingMetadata) GetVm() *Vm {
@@ -759,6 +854,13 @@ func (x *CreateVmStreamingMetadata) GetUserDataSize() uint64 {
 	return 0
 }
 
+func (x *CreateVmStreamingMetadata) GetMinimumFreeBytes() uint64 {
+	if x != nil {
+		return x.MinimumFreeBytes
+	}
+	return 0
+}
+
 // CreateVmStreamingResponse contains progress or final result
 type CreateVmStreamingResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -774,7 +876,7 @@ type CreateVmStreamingResponse struct {
 
 func (x *CreateVmStreamingResponse) Reset() {
 	*x = CreateVmStreamingResponse{}
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[10]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -786,7 +888,7 @@ func (x *CreateVmStreamingResponse) String() string {
 func (*CreateVmStreamingResponse) ProtoMessage() {}
 
 func (x *CreateVmStreamingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[10]
+	mi := &file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -799,7 +901,7 @@ func (x *CreateVmStreamingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateVmStreamingResponse.ProtoReflect.Descriptor instead.
 func (*CreateVmStreamingResponse) Descriptor() ([]byte, []int) {
-	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{10}
+	return file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *CreateVmStreamingResponse) GetProgressMessage() string {
@@ -828,7 +930,7 @@ var File_proto_hypervisor_grpc_hypervisor_proto protoreflect.FileDescriptor
 const file_proto_hypervisor_grpc_hypervisor_proto_rawDesc = "" +
 	"\n" +
 	"&proto/hypervisor/grpc/hypervisor.proto\x12\n" +
-	"hypervisor\x1a\x1cgoogle/api/annotations.proto\"\x93\x03\n" +
+	"hypervisor\x1a\x1cgoogle/api/annotations.proto\"\xb0\x03\n" +
 	"\x02Vm\x12\x1d\n" +
 	"\n" +
 	"ip_address\x18\x01 \x01(\tR\tipAddress\x12)\n" +
@@ -845,7 +947,8 @@ const file_proto_hypervisor_grpc_hypervisor_proto_rawDesc = "" +
 	"\x04tags\x18\t \x03(\v2\x18.hypervisor.Vm.TagsEntryR\x04tags\x12 \n" +
 	"\fdo_not_start\x18\n" +
 	" \x01(\bR\n" +
-	"doNotStart\x1a7\n" +
+	"doNotStart\x12\x1b\n" +
+	"\tsubnet_id\x18\v \x01(\tR\bsubnetId\x1a7\n" +
 	"\tTagsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"1\n" +
@@ -853,7 +956,11 @@ const file_proto_hypervisor_grpc_hypervisor_proto_rawDesc = "" +
 	"\x02vm\x18\x01 \x01(\v2\x0e.hypervisor.VmR\x02vm\"/\n" +
 	"\x0eStartVmRequest\x12\x1d\n" +
 	"\n" +
-	"ip_address\x18\x01 \x01(\tR\tipAddress\"1\n" +
+	"ip_address\x18\x01 \x01(\tR\tipAddress\"5\n" +
+	"\x14AcknowledgeVmRequest\x12\x1d\n" +
+	"\n" +
+	"ip_address\x18\x01 \x01(\tR\tipAddress\"\x17\n" +
+	"\x15AcknowledgeVmResponse\"1\n" +
 	"\x10DestroyVmRequest\x12\x1d\n" +
 	"\n" +
 	"ip_address\x18\x01 \x01(\tR\tipAddress\"\x13\n" +
@@ -869,12 +976,13 @@ const file_proto_hypervisor_grpc_hypervisor_proto_rawDesc = "" +
 	"\x18CreateVmStreamingRequest\x12C\n" +
 	"\bmetadata\x18\x01 \x01(\v2%.hypervisor.CreateVmStreamingMetadataH\x00R\bmetadata\x12*\n" +
 	"\x10image_data_chunk\x18\x02 \x01(\fH\x00R\x0eimageDataChunkB\t\n" +
-	"\arequest\"\xac\x01\n" +
+	"\arequest\"\xda\x01\n" +
 	"\x19CreateVmStreamingMetadata\x12\x1e\n" +
 	"\x02vm\x18\x01 \x01(\v2\x0e.hypervisor.VmR\x02vm\x12&\n" +
 	"\x0fimage_data_size\x18\x02 \x01(\x04R\rimageDataSize\x12!\n" +
 	"\fdhcp_timeout\x18\x03 \x01(\x03R\vdhcpTimeout\x12$\n" +
-	"\x0euser_data_size\x18\x04 \x01(\x04R\fuserDataSize\"\x8c\x01\n" +
+	"\x0euser_data_size\x18\x04 \x01(\x04R\fuserDataSize\x12,\n" +
+	"\x12minimum_free_bytes\x18\x05 \x01(\x04R\x10minimumFreeBytes\"\x8c\x01\n" +
 	"\x19CreateVmStreamingResponse\x12)\n" +
 	"\x10progress_message\x18\x01 \x01(\tR\x0fprogressMessage\x12\x1e\n" +
 	"\x02vm\x18\x02 \x01(\v2\x0e.hypervisor.VmR\x02vm\x12$\n" +
@@ -895,12 +1003,12 @@ const file_proto_hypervisor_grpc_hypervisor_proto_rawDesc = "" +
 	"\x06VmView\x12\x17\n" +
 	"\x13VM_VIEW_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rVM_VIEW_BASIC\x10\x01\x12\x10\n" +
-	"\fVM_VIEW_FULL\x10\x022\xa9\x04\n" +
+	"\fVM_VIEW_FULL\x10\x022\xa8\x04\n" +
 	"\n" +
-	"Hypervisor\x12L\n" +
-	"\bCreateVm\x12\x1b.hypervisor.CreateVmRequest\x1a\x0e.hypervisor.Vm\"\x13\x82\xd3\xe4\x93\x02\r:\x02vm\"\a/v1/vms\x12d\n" +
-	"\x11CreateVmStreaming\x12$.hypervisor.CreateVmStreamingRequest\x1a%.hypervisor.CreateVmStreamingResponse(\x010\x01\x12Y\n" +
-	"\aStartVm\x12\x1a.hypervisor.StartVmRequest\x1a\x0e.hypervisor.Vm\"\"\x82\xd3\xe4\x93\x02\x1c\"\x1a/v1/vms/{ip_address}:start\x12f\n" +
+	"Hypervisor\x12[\n" +
+	"\bCreateVm\x12$.hypervisor.CreateVmStreamingRequest\x1a%.hypervisor.CreateVmStreamingResponse(\x010\x01\x12Y\n" +
+	"\aStartVm\x12\x1a.hypervisor.StartVmRequest\x1a\x0e.hypervisor.Vm\"\"\x82\xd3\xe4\x93\x02\x1c\"\x1a/v1/vms/{ip_address}:start\x12T\n" +
+	"\rAcknowledgeVm\x12 .hypervisor.AcknowledgeVmRequest\x1a!.hypervisor.AcknowledgeVmResponse\x12f\n" +
 	"\tDestroyVm\x12\x1c.hypervisor.DestroyVmRequest\x1a\x1d.hypervisor.DestroyVmResponse\"\x1c\x82\xd3\xe4\x93\x02\x16*\x14/v1/vms/{ip_address}\x12S\n" +
 	"\aListVms\x12\x1a.hypervisor.ListVmsRequest\x1a\x1b.hypervisor.ListVmsResponse\"\x0f\x82\xd3\xe4\x93\x02\t\x12\a/v1/vms\x12O\n" +
 	"\x05GetVm\x12\x18.hypervisor.GetVmRequest\x1a\x0e.hypervisor.Vm\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1/vms/{ip_address}B>Z<github.com/Cloud-Foundations/Dominator/proto/hypervisor/grpcb\x06proto3"
@@ -918,44 +1026,46 @@ func file_proto_hypervisor_grpc_hypervisor_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_hypervisor_grpc_hypervisor_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proto_hypervisor_grpc_hypervisor_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_proto_hypervisor_grpc_hypervisor_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_proto_hypervisor_grpc_hypervisor_proto_goTypes = []any{
 	(VmState)(0),                      // 0: hypervisor.VmState
 	(VmView)(0),                       // 1: hypervisor.VmView
 	(*Vm)(nil),                        // 2: hypervisor.Vm
 	(*CreateVmRequest)(nil),           // 3: hypervisor.CreateVmRequest
 	(*StartVmRequest)(nil),            // 4: hypervisor.StartVmRequest
-	(*DestroyVmRequest)(nil),          // 5: hypervisor.DestroyVmRequest
-	(*DestroyVmResponse)(nil),         // 6: hypervisor.DestroyVmResponse
-	(*ListVmsRequest)(nil),            // 7: hypervisor.ListVmsRequest
-	(*ListVmsResponse)(nil),           // 8: hypervisor.ListVmsResponse
-	(*GetVmRequest)(nil),              // 9: hypervisor.GetVmRequest
-	(*CreateVmStreamingRequest)(nil),  // 10: hypervisor.CreateVmStreamingRequest
-	(*CreateVmStreamingMetadata)(nil), // 11: hypervisor.CreateVmStreamingMetadata
-	(*CreateVmStreamingResponse)(nil), // 12: hypervisor.CreateVmStreamingResponse
-	nil,                               // 13: hypervisor.Vm.TagsEntry
+	(*AcknowledgeVmRequest)(nil),      // 5: hypervisor.AcknowledgeVmRequest
+	(*AcknowledgeVmResponse)(nil),     // 6: hypervisor.AcknowledgeVmResponse
+	(*DestroyVmRequest)(nil),          // 7: hypervisor.DestroyVmRequest
+	(*DestroyVmResponse)(nil),         // 8: hypervisor.DestroyVmResponse
+	(*ListVmsRequest)(nil),            // 9: hypervisor.ListVmsRequest
+	(*ListVmsResponse)(nil),           // 10: hypervisor.ListVmsResponse
+	(*GetVmRequest)(nil),              // 11: hypervisor.GetVmRequest
+	(*CreateVmStreamingRequest)(nil),  // 12: hypervisor.CreateVmStreamingRequest
+	(*CreateVmStreamingMetadata)(nil), // 13: hypervisor.CreateVmStreamingMetadata
+	(*CreateVmStreamingResponse)(nil), // 14: hypervisor.CreateVmStreamingResponse
+	nil,                               // 15: hypervisor.Vm.TagsEntry
 }
 var file_proto_hypervisor_grpc_hypervisor_proto_depIdxs = []int32{
 	0,  // 0: hypervisor.Vm.state:type_name -> hypervisor.VmState
-	13, // 1: hypervisor.Vm.tags:type_name -> hypervisor.Vm.TagsEntry
+	15, // 1: hypervisor.Vm.tags:type_name -> hypervisor.Vm.TagsEntry
 	2,  // 2: hypervisor.CreateVmRequest.vm:type_name -> hypervisor.Vm
 	1,  // 3: hypervisor.ListVmsRequest.view:type_name -> hypervisor.VmView
 	2,  // 4: hypervisor.ListVmsResponse.vms:type_name -> hypervisor.Vm
 	1,  // 5: hypervisor.GetVmRequest.view:type_name -> hypervisor.VmView
-	11, // 6: hypervisor.CreateVmStreamingRequest.metadata:type_name -> hypervisor.CreateVmStreamingMetadata
+	13, // 6: hypervisor.CreateVmStreamingRequest.metadata:type_name -> hypervisor.CreateVmStreamingMetadata
 	2,  // 7: hypervisor.CreateVmStreamingMetadata.vm:type_name -> hypervisor.Vm
 	2,  // 8: hypervisor.CreateVmStreamingResponse.vm:type_name -> hypervisor.Vm
-	3,  // 9: hypervisor.Hypervisor.CreateVm:input_type -> hypervisor.CreateVmRequest
-	10, // 10: hypervisor.Hypervisor.CreateVmStreaming:input_type -> hypervisor.CreateVmStreamingRequest
-	4,  // 11: hypervisor.Hypervisor.StartVm:input_type -> hypervisor.StartVmRequest
-	5,  // 12: hypervisor.Hypervisor.DestroyVm:input_type -> hypervisor.DestroyVmRequest
-	7,  // 13: hypervisor.Hypervisor.ListVms:input_type -> hypervisor.ListVmsRequest
-	9,  // 14: hypervisor.Hypervisor.GetVm:input_type -> hypervisor.GetVmRequest
-	2,  // 15: hypervisor.Hypervisor.CreateVm:output_type -> hypervisor.Vm
-	12, // 16: hypervisor.Hypervisor.CreateVmStreaming:output_type -> hypervisor.CreateVmStreamingResponse
-	2,  // 17: hypervisor.Hypervisor.StartVm:output_type -> hypervisor.Vm
-	6,  // 18: hypervisor.Hypervisor.DestroyVm:output_type -> hypervisor.DestroyVmResponse
-	8,  // 19: hypervisor.Hypervisor.ListVms:output_type -> hypervisor.ListVmsResponse
+	12, // 9: hypervisor.Hypervisor.CreateVm:input_type -> hypervisor.CreateVmStreamingRequest
+	4,  // 10: hypervisor.Hypervisor.StartVm:input_type -> hypervisor.StartVmRequest
+	5,  // 11: hypervisor.Hypervisor.AcknowledgeVm:input_type -> hypervisor.AcknowledgeVmRequest
+	7,  // 12: hypervisor.Hypervisor.DestroyVm:input_type -> hypervisor.DestroyVmRequest
+	9,  // 13: hypervisor.Hypervisor.ListVms:input_type -> hypervisor.ListVmsRequest
+	11, // 14: hypervisor.Hypervisor.GetVm:input_type -> hypervisor.GetVmRequest
+	14, // 15: hypervisor.Hypervisor.CreateVm:output_type -> hypervisor.CreateVmStreamingResponse
+	2,  // 16: hypervisor.Hypervisor.StartVm:output_type -> hypervisor.Vm
+	6,  // 17: hypervisor.Hypervisor.AcknowledgeVm:output_type -> hypervisor.AcknowledgeVmResponse
+	8,  // 18: hypervisor.Hypervisor.DestroyVm:output_type -> hypervisor.DestroyVmResponse
+	10, // 19: hypervisor.Hypervisor.ListVms:output_type -> hypervisor.ListVmsResponse
 	2,  // 20: hypervisor.Hypervisor.GetVm:output_type -> hypervisor.Vm
 	15, // [15:21] is the sub-list for method output_type
 	9,  // [9:15] is the sub-list for method input_type
@@ -969,7 +1079,7 @@ func file_proto_hypervisor_grpc_hypervisor_proto_init() {
 	if File_proto_hypervisor_grpc_hypervisor_proto != nil {
 		return
 	}
-	file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[8].OneofWrappers = []any{
+	file_proto_hypervisor_grpc_hypervisor_proto_msgTypes[10].OneofWrappers = []any{
 		(*CreateVmStreamingRequest_Metadata)(nil),
 		(*CreateVmStreamingRequest_ImageDataChunk)(nil),
 	}
@@ -979,7 +1089,7 @@ func file_proto_hypervisor_grpc_hypervisor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_hypervisor_grpc_hypervisor_proto_rawDesc), len(file_proto_hypervisor_grpc_hypervisor_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

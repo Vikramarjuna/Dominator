@@ -1,7 +1,6 @@
 package rpcd
 
 import (
-	"context"
 	"errors"
 	"time"
 
@@ -17,65 +16,12 @@ func (t *srpcType) CreateVm(conn *srpc.Conn) error {
 	return t.manager.CreateVm(conn)
 }
 
-func validateCreateVmRequest(vm *pb.Vm) error {
-	if vm == nil {
-		return liberrors.NewInvalidArgumentError("vm", "required")
-	}
-	if vm.Hostname == "" {
-		return liberrors.NewInvalidArgumentError("vm.hostname", "required")
-	}
-	if vm.MemoryInMib == 0 {
-		return liberrors.NewInvalidArgumentError("vm.memory_in_mib", "required")
-	}
-	if vm.MilliCpus == 0 {
-		return liberrors.NewInvalidArgumentError("vm.milli_cpus", "required")
-	}
-	if vm.ImageName == "" && vm.ImageUrl == "" {
-		return liberrors.NewInvalidArgumentError("vm.image", "either image_name or image_url must be specified")
-	}
-	if vm.ImageName != "" && vm.ImageUrl != "" {
-		return liberrors.NewInvalidArgumentError("vm.image", "cannot specify both image_name and image_url")
-	}
-	return nil
-}
-
-// CreateVm gRPC handler (async/non-blocking)
-// Returns immediately with VM in starting state
-// Client polls GetVm to check completion
-// For minimal implementation, this returns Unimplemented
-// TODO: Implement async VM creation in follow-up PR
-func (s *grpcServer) CreateVm(ctx context.Context, req *pb.CreateVmRequest) (*pb.Vm, error) {
-	username := "unknown"
-	if conn := lib_grpc.AuthInfoFromContext(ctx); conn != nil {
-		if authInfo := conn.GetAuthInformation(); authInfo != nil {
-			username = authInfo.Username
-		}
-	}
-
-	vm := req.GetVm()
-	hostname := ""
-	if vm != nil {
-		hostname = vm.Hostname
-	}
-
-	s.logger.Debugf(1, "CreateVm(%s) called for hostname=%s\n", username, hostname)
-
-	// Validate request
-	if err := validateCreateVmRequest(vm); err != nil {
-		return nil, err
-	}
-
-	// For minimal implementation, return Unimplemented
-	// The full implementation would create VM asynchronously
-	return nil, liberrors.NewUnimplementedError("CreateVm async - use CreateVmStreaming API")
-}
-
-// CreateVmStreaming gRPC handler - bidirectional streaming
+// CreateVm gRPC handler - bidirectional streaming
 // Client sends: initial metadata request, then optionally streams image data chunks
 // Server sends: multiple progress messages during VM creation
 // This reuses the manager's CreateVm implementation by wrapping the gRPC stream
 // in an SRPC-compatible conn interface
-func (s *grpcServer) CreateVmStreaming(stream pb.Hypervisor_CreateVmStreamingServer) error {
+func (s *grpcServer) CreateVm(stream pb.Hypervisor_CreateVmServer) error {
 	conn := lib_grpc.AuthInfoFromContext(stream.Context())
 	if conn == nil {
 		return liberrors.NewUnauthenticatedError("no connection in context")
@@ -85,12 +31,12 @@ func (s *grpcServer) CreateVmStreaming(stream pb.Hypervisor_CreateVmStreamingSer
 		return liberrors.NewUnauthenticatedError("no auth information")
 	}
 
-	s.logger.Debugf(1, "CreateVmStreaming(gRPC) called\n")
+	s.logger.Debugf(1, "CreateVm(gRPC) called\n")
 
 	// Receive first message (metadata)
 	firstMsg, err := stream.Recv()
 	if err != nil {
-		s.logger.Debugf(1, "CreateVmStreaming(gRPC) failed to receive metadata: %v\n", err)
+		s.logger.Debugf(1, "CreateVm(gRPC) failed to receive metadata: %v\n", err)
 		return err
 	}
 
@@ -103,24 +49,24 @@ func (s *grpcServer) CreateVmStreaming(stream pb.Hypervisor_CreateVmStreamingSer
 	if metadata.Vm != nil {
 		hostname = metadata.Vm.Hostname
 	}
-	s.logger.Debugf(1, "CreateVmStreaming(gRPC) for hostname=%s\n", hostname)
+	s.logger.Debugf(1, "CreateVm(gRPC) for hostname=%s\n", hostname)
 
 	// Create streaming conn wrapper with conversion functions
 	streamConn := lib_grpc.NewStreamingConn(
 		stream.Context(),
 		createVmStreamingRequestDecoder(metadata, authInfo),
 		createVmStreamingResponseEncoder(stream),
-		lib_grpc.WithReadFunc(createImageDataReader(stream)),
+		lib_grpc.NewChunkReader(imageDataChunks(stream)),
 	)
 
 	// Call the manager's CreateVm - it will use conn.Decode(), conn.Read(), and conn.Encode()
 	err = s.manager.CreateVm(streamConn)
 	if err != nil {
-		s.logger.Debugf(1, "CreateVmStreaming(gRPC) failed: %v\n", err)
+		s.logger.Debugf(1, "CreateVm(gRPC) failed: %v\n", err)
 		return lib_grpc.ErrorToStatus(err)
 	}
 
-	s.logger.Debugf(1, "CreateVmStreaming(gRPC) finished\n")
+	s.logger.Debugf(1, "CreateVm(gRPC) finished\n")
 	return nil
 }
 
@@ -161,52 +107,31 @@ func createVmStreamingRequestDecoder(metadata *pb.CreateVmStreamingMetadata, aut
 				ImageURL:    vm.ImageUrl,
 				MemoryInMiB: uint64(vm.MemoryInMib),
 				MilliCPUs:   uint(vm.MilliCpus),
+				SubnetId:    vm.SubnetId,
 				OwnerUsers:  ownerUsers,
 				Tags:        vmTags,
 			},
-			DoNotStart:    vm.DoNotStart,
-			DhcpTimeout:   dhcpTimeout,
-			ImageDataSize: metadata.ImageDataSize,
-			UserDataSize:  metadata.UserDataSize,
+			DoNotStart:       vm.DoNotStart,
+			DhcpTimeout:      dhcpTimeout,
+			ImageDataSize:    metadata.ImageDataSize,
+			MinimumFreeBytes: metadata.MinimumFreeBytes,
+			UserDataSize:     metadata.UserDataSize,
 		}
 		return nil
 	}
 }
 
-// createImageDataReader returns a function that reads image data chunks from the gRPC stream.
-// This implements the io.Reader interface for StreamingConn.
-// The manager calls conn.Read() to stream image data after decoding the initial request.
-func createImageDataReader(stream pb.Hypervisor_CreateVmStreamingServer) func(p []byte) (int, error) {
-	var buffer []byte // Buffer for partial chunk data
-
-	return func(p []byte) (int, error) {
-		// If we have buffered data, use it first
-		if len(buffer) > 0 {
-			n := copy(p, buffer)
-			buffer = buffer[n:]
-			return n, nil
-		}
-
-		// Receive next message from stream
+// imageDataChunks returns a function that receives the next image data chunk
+// from the gRPC stream. The error is io.EOF when the client closes the stream.
+// A message without image data yields an empty chunk.
+func imageDataChunks(
+	stream pb.Hypervisor_CreateVmServer) func() ([]byte, error) {
+	return func() ([]byte, error) {
 		msg, err := stream.Recv()
 		if err != nil {
-			return 0, err // io.EOF when client closes stream
+			return nil, err
 		}
-
-		// Get image data chunk
-		chunk := msg.GetImageDataChunk()
-		if chunk == nil {
-			// No more image data
-			return 0, nil
-		}
-
-		// Copy chunk to output buffer
-		n := copy(p, chunk)
-		if n < len(chunk) {
-			// Save remaining data for next Read() call
-			buffer = chunk[n:]
-		}
-		return n, nil
+		return msg.GetImageDataChunk(), nil
 	}
 }
 
@@ -219,7 +144,7 @@ func createImageDataReader(stream pb.Hypervisor_CreateVmStreamingServer) func(p 
 // Final flag: SRPC uses a Final flag to indicate the last response, but gRPC uses stream completion.
 // The manager will send Final=true in the last response, then return. We just send all responses
 // (including the final one), and the stream closes naturally when the handler returns.
-func createVmStreamingResponseEncoder(stream pb.Hypervisor_CreateVmStreamingServer) func(v any) error {
+func createVmStreamingResponseEncoder(stream pb.Hypervisor_CreateVmServer) func(v any) error {
 	return func(v any) error {
 		// Handle both pointer and value types
 		var resp *proto.CreateVmResponse

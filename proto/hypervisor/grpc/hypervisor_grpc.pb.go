@@ -19,12 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Hypervisor_CreateVm_FullMethodName          = "/hypervisor.Hypervisor/CreateVm"
-	Hypervisor_CreateVmStreaming_FullMethodName = "/hypervisor.Hypervisor/CreateVmStreaming"
-	Hypervisor_StartVm_FullMethodName           = "/hypervisor.Hypervisor/StartVm"
-	Hypervisor_DestroyVm_FullMethodName         = "/hypervisor.Hypervisor/DestroyVm"
-	Hypervisor_ListVms_FullMethodName           = "/hypervisor.Hypervisor/ListVms"
-	Hypervisor_GetVm_FullMethodName             = "/hypervisor.Hypervisor/GetVm"
+	Hypervisor_CreateVm_FullMethodName      = "/hypervisor.Hypervisor/CreateVm"
+	Hypervisor_StartVm_FullMethodName       = "/hypervisor.Hypervisor/StartVm"
+	Hypervisor_AcknowledgeVm_FullMethodName = "/hypervisor.Hypervisor/AcknowledgeVm"
+	Hypervisor_DestroyVm_FullMethodName     = "/hypervisor.Hypervisor/DestroyVm"
+	Hypervisor_ListVms_FullMethodName       = "/hypervisor.Hypervisor/ListVms"
+	Hypervisor_GetVm_FullMethodName         = "/hypervisor.Hypervisor/GetVm"
 )
 
 // HypervisorClient is the client API for Hypervisor service.
@@ -33,16 +33,15 @@ const (
 //
 // Hypervisor service
 type HypervisorClient interface {
-	// CreateVm creates a VM asynchronously (non-blocking)
-	// Returns immediately with VM in starting state
-	// Client polls GetVm to check completion
-	CreateVm(ctx context.Context, in *CreateVmRequest, opts ...grpc.CallOption) (*Vm, error)
-	// CreateVmStreaming creates a VM with bidirectional streaming (blocking)
+	// CreateVm creates a VM with bidirectional streaming (blocking)
 	// Client sends: initial request, then optionally streams image data
 	// Server sends: multiple progress messages until VM is fully created
-	CreateVmStreaming(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[CreateVmStreamingRequest, CreateVmStreamingResponse], error)
+	CreateVm(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[CreateVmStreamingRequest, CreateVmStreamingResponse], error)
 	// StartVm starts a stopped VM
 	StartVm(ctx context.Context, in *StartVmRequest, opts ...grpc.CallOption) (*Vm, error)
+	// AcknowledgeVm tells the hypervisor to keep a newly created VM. A VM that
+	// is not acknowledged is destroyed after a timeout.
+	AcknowledgeVm(ctx context.Context, in *AcknowledgeVmRequest, opts ...grpc.CallOption) (*AcknowledgeVmResponse, error)
 	// DestroyVm destroys a VM
 	DestroyVm(ctx context.Context, in *DestroyVmRequest, opts ...grpc.CallOption) (*DestroyVmResponse, error)
 	// ListVms lists all VMs on the hypervisor
@@ -59,19 +58,9 @@ func NewHypervisorClient(cc grpc.ClientConnInterface) HypervisorClient {
 	return &hypervisorClient{cc}
 }
 
-func (c *hypervisorClient) CreateVm(ctx context.Context, in *CreateVmRequest, opts ...grpc.CallOption) (*Vm, error) {
+func (c *hypervisorClient) CreateVm(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[CreateVmStreamingRequest, CreateVmStreamingResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Vm)
-	err := c.cc.Invoke(ctx, Hypervisor_CreateVm_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *hypervisorClient) CreateVmStreaming(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[CreateVmStreamingRequest, CreateVmStreamingResponse], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Hypervisor_ServiceDesc.Streams[0], Hypervisor_CreateVmStreaming_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Hypervisor_ServiceDesc.Streams[0], Hypervisor_CreateVm_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -80,12 +69,22 @@ func (c *hypervisorClient) CreateVmStreaming(ctx context.Context, opts ...grpc.C
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Hypervisor_CreateVmStreamingClient = grpc.BidiStreamingClient[CreateVmStreamingRequest, CreateVmStreamingResponse]
+type Hypervisor_CreateVmClient = grpc.BidiStreamingClient[CreateVmStreamingRequest, CreateVmStreamingResponse]
 
 func (c *hypervisorClient) StartVm(ctx context.Context, in *StartVmRequest, opts ...grpc.CallOption) (*Vm, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Vm)
 	err := c.cc.Invoke(ctx, Hypervisor_StartVm_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hypervisorClient) AcknowledgeVm(ctx context.Context, in *AcknowledgeVmRequest, opts ...grpc.CallOption) (*AcknowledgeVmResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AcknowledgeVmResponse)
+	err := c.cc.Invoke(ctx, Hypervisor_AcknowledgeVm_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -128,16 +127,15 @@ func (c *hypervisorClient) GetVm(ctx context.Context, in *GetVmRequest, opts ...
 //
 // Hypervisor service
 type HypervisorServer interface {
-	// CreateVm creates a VM asynchronously (non-blocking)
-	// Returns immediately with VM in starting state
-	// Client polls GetVm to check completion
-	CreateVm(context.Context, *CreateVmRequest) (*Vm, error)
-	// CreateVmStreaming creates a VM with bidirectional streaming (blocking)
+	// CreateVm creates a VM with bidirectional streaming (blocking)
 	// Client sends: initial request, then optionally streams image data
 	// Server sends: multiple progress messages until VM is fully created
-	CreateVmStreaming(grpc.BidiStreamingServer[CreateVmStreamingRequest, CreateVmStreamingResponse]) error
+	CreateVm(grpc.BidiStreamingServer[CreateVmStreamingRequest, CreateVmStreamingResponse]) error
 	// StartVm starts a stopped VM
 	StartVm(context.Context, *StartVmRequest) (*Vm, error)
+	// AcknowledgeVm tells the hypervisor to keep a newly created VM. A VM that
+	// is not acknowledged is destroyed after a timeout.
+	AcknowledgeVm(context.Context, *AcknowledgeVmRequest) (*AcknowledgeVmResponse, error)
 	// DestroyVm destroys a VM
 	DestroyVm(context.Context, *DestroyVmRequest) (*DestroyVmResponse, error)
 	// ListVms lists all VMs on the hypervisor
@@ -153,14 +151,14 @@ type HypervisorServer interface {
 // pointer dereference when methods are called.
 type UnimplementedHypervisorServer struct{}
 
-func (UnimplementedHypervisorServer) CreateVm(context.Context, *CreateVmRequest) (*Vm, error) {
-	return nil, status.Error(codes.Unimplemented, "method CreateVm not implemented")
-}
-func (UnimplementedHypervisorServer) CreateVmStreaming(grpc.BidiStreamingServer[CreateVmStreamingRequest, CreateVmStreamingResponse]) error {
-	return status.Error(codes.Unimplemented, "method CreateVmStreaming not implemented")
+func (UnimplementedHypervisorServer) CreateVm(grpc.BidiStreamingServer[CreateVmStreamingRequest, CreateVmStreamingResponse]) error {
+	return status.Error(codes.Unimplemented, "method CreateVm not implemented")
 }
 func (UnimplementedHypervisorServer) StartVm(context.Context, *StartVmRequest) (*Vm, error) {
 	return nil, status.Error(codes.Unimplemented, "method StartVm not implemented")
+}
+func (UnimplementedHypervisorServer) AcknowledgeVm(context.Context, *AcknowledgeVmRequest) (*AcknowledgeVmResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AcknowledgeVm not implemented")
 }
 func (UnimplementedHypervisorServer) DestroyVm(context.Context, *DestroyVmRequest) (*DestroyVmResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DestroyVm not implemented")
@@ -191,30 +189,12 @@ func RegisterHypervisorServer(s grpc.ServiceRegistrar, srv HypervisorServer) {
 	s.RegisterService(&Hypervisor_ServiceDesc, srv)
 }
 
-func _Hypervisor_CreateVm_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateVmRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(HypervisorServer).CreateVm(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Hypervisor_CreateVm_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HypervisorServer).CreateVm(ctx, req.(*CreateVmRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Hypervisor_CreateVmStreaming_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(HypervisorServer).CreateVmStreaming(&grpc.GenericServerStream[CreateVmStreamingRequest, CreateVmStreamingResponse]{ServerStream: stream})
+func _Hypervisor_CreateVm_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(HypervisorServer).CreateVm(&grpc.GenericServerStream[CreateVmStreamingRequest, CreateVmStreamingResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Hypervisor_CreateVmStreamingServer = grpc.BidiStreamingServer[CreateVmStreamingRequest, CreateVmStreamingResponse]
+type Hypervisor_CreateVmServer = grpc.BidiStreamingServer[CreateVmStreamingRequest, CreateVmStreamingResponse]
 
 func _Hypervisor_StartVm_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(StartVmRequest)
@@ -230,6 +210,24 @@ func _Hypervisor_StartVm_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HypervisorServer).StartVm(ctx, req.(*StartVmRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Hypervisor_AcknowledgeVm_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AcknowledgeVmRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HypervisorServer).AcknowledgeVm(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Hypervisor_AcknowledgeVm_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HypervisorServer).AcknowledgeVm(ctx, req.(*AcknowledgeVmRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -296,12 +294,12 @@ var Hypervisor_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*HypervisorServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "CreateVm",
-			Handler:    _Hypervisor_CreateVm_Handler,
-		},
-		{
 			MethodName: "StartVm",
 			Handler:    _Hypervisor_StartVm_Handler,
+		},
+		{
+			MethodName: "AcknowledgeVm",
+			Handler:    _Hypervisor_AcknowledgeVm_Handler,
 		},
 		{
 			MethodName: "DestroyVm",
@@ -318,8 +316,8 @@ var Hypervisor_ServiceDesc = grpc.ServiceDesc{
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "CreateVmStreaming",
-			Handler:       _Hypervisor_CreateVmStreaming_Handler,
+			StreamName:    "CreateVm",
+			Handler:       _Hypervisor_CreateVm_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},
