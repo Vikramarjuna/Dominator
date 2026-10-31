@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"io"
+	"maps"
+	"net"
 	"strings"
 	"time"
 
@@ -14,8 +16,9 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	liberrors "github.com/Cloud-Foundations/Dominator/lib/errors"
+	"github.com/Cloud-Foundations/Dominator/lib/errors"
 	"github.com/Cloud-Foundations/Dominator/lib/srpc"
+	"github.com/Cloud-Foundations/Dominator/lib/tags"
 )
 
 type authInfoKeyType struct{}
@@ -216,14 +219,14 @@ func newStreamingConn(ctx context.Context, decode func(v interface{}) error,
 // peek returns nil and an UnimplementedError, since the stream cannot be
 // peeked at.
 func (c *StreamingConn) peek(n int) ([]byte, error) {
-	return nil, liberrors.NewUnimplementedError("Peek")
+	return nil, errors.NewUnimplementedError("Peek")
 }
 
 // read returns the number of bytes read into p from the reader, or an
 // UnimplementedError if there is none.
 func (c *StreamingConn) read(p []byte) (int, error) {
 	if c.reader == nil {
-		return 0, liberrors.NewUnimplementedError("Read")
+		return 0, errors.NewUnimplementedError("Read")
 	}
 	return c.reader.Read(p)
 }
@@ -235,4 +238,49 @@ func (c *StreamingConn) username() string {
 		return ""
 	}
 	return c.authInformation.Username
+}
+
+// ipToString returns the text form of ip, or "" if ip is empty.
+func ipToString(ip net.IP) string {
+	if len(ip) < 1 {
+		return ""
+	}
+	return ip.String()
+}
+
+// mapToTags returns a copy of m, or nil if m is nil.
+func mapToTags(m map[string]string) tags.Tags {
+	return maps.Clone(tags.Tags(m))
+}
+
+// stringToIP returns the address parsed from s, or nil if s is empty. The
+// error is an *errors.InvalidArgumentError if s is not an IP address.
+func stringToIP(s string) (net.IP, error) {
+	if s == "" {
+		return nil, nil
+	}
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return nil, errors.NewInvalidArgumentError("ip_address",
+			"malformed IP address: "+s)
+	}
+	return ip, nil
+}
+
+// stringToMAC returns the address parsed from s, or nil if s is empty. The
+// error is an *errors.InvalidArgumentError if s is not a MAC address.
+func stringToMAC(s string) (net.HardwareAddr, error) {
+	if s == "" {
+		return nil, nil
+	}
+	mac, err := net.ParseMAC(s)
+	if err != nil {
+		return nil, errors.NewInvalidArgumentError("mac_address", err.Error())
+	}
+	return mac, nil
+}
+
+// tagsToMap returns a copy of t, or nil if t is nil.
+func tagsToMap(t tags.Tags) map[string]string {
+	return maps.Clone(map[string]string(t))
 }
