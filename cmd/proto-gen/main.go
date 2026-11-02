@@ -5,19 +5,22 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	"github.com/Cloud-Foundations/Dominator/lib/flags/loadflags"
+	"github.com/Cloud-Foundations/Dominator/lib/fsutil"
 )
 
 var (
-	protoDir = flag.String("proto", "",
-		"Directory of the Go package containing the request and reply types")
-	rpcdDir = flag.String("rpcd", "",
-		"Directory of the Go package containing the annotated SRPC methods")
-	outFile = flag.String("out", "",
-		"File to write the generated .proto to. If empty, print the scan")
 	goPackage = flag.String("goPackage", "",
 		"Import path of the generated Go code (with -out)")
+	outFile = flag.String("out", "",
+		"File to write the generated .proto to. If empty, print the scan")
+	protoDir = flag.String("proto", "",
+		"Directory of the Go package containing the request and reply types")
 	protoPackage = flag.String("package", "",
 		"Name of the proto package (with -out)")
+	rpcdDir = flag.String("rpcd", "",
+		"Directory of the Go package containing the annotated SRPC methods")
 	serviceName = flag.String("service", "",
 		"Name of the gRPC service (with -out)")
 )
@@ -61,16 +64,22 @@ func checkOutFlags(out, goPkg, protoPkg, service string) error {
 // exit status.
 func doMain() int {
 	flag.Usage = func() {
-		fmt.Fprint(os.Stderr, "Usage: proto-gen -rpcd dir -proto dir\n"+
-			"       [-out file -package name -goPackage path -service name]\n")
+		fmt.Fprintln(os.Stderr, "Usage: proto-gen -rpcd dir -proto dir")
+		fmt.Fprintln(os.Stderr,
+			"       [-out file -package name -goPackage path -service name]")
 		flag.PrintDefaults()
+	}
+	err := loadflags.LoadForCli("proto-gen")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
 	flag.Parse()
 	if *protoDir == "" || *rpcdDir == "" {
 		flag.Usage()
 		return 2
 	}
-	err := checkOutFlags(*outFile, *goPackage, *protoPackage, *serviceName)
+	err = checkOutFlags(*outFile, *goPackage, *protoPackage, *serviceName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		flag.Usage()
@@ -105,7 +114,7 @@ func doMain() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	err = os.WriteFile(*outFile, []byte(text), 0o644)
+	err = os.WriteFile(*outFile, []byte(text), fsutil.PublicFilePerms)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

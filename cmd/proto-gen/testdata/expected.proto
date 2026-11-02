@@ -37,7 +37,7 @@ message VmInfo {
   Address Address = 1;
   string Hostname = 5;
   repeated Address Secondary = 2;
-  uint32 State = 3;
+  uint64 State = 3;
   map<string, Address> Volumes = 4;
   uint64 First = 6;
   uint64 Next = 7;

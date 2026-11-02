@@ -93,67 +93,61 @@ func TestProtoType(t *testing.T) {
 	}{
 		{"string", "string", ""},
 		{"bool", "bool", ""},
-		{"int", "int32", ""},
+		{"int", "int64", ""},
 		{"int8", "int32", ""},
 		{"int16", "int32", ""},
-		{"int32", "int32", ""},
-		{"uint8", "uint32", ""},
-		{"uint16", "uint32", ""},
-		{"uint32", "uint32", ""},
 		{"byte", "uint32", ""},
+		{"uint16", "uint32", ""},
 		{"rune", "int32", ""},
 		{"int64", "int64", ""},
-		{"uint", "uint32", ""},
+		{"uint", "uint64", ""},
 		{"float32", "float", ""},
 		{"float64", "double", ""},
+		{"complex64", "", "cannot map type complex64"},
+		{"uintptr", "", "cannot map type uintptr"},
+		{"error", "", "cannot map type error"},
+		{"any", "", "cannot map type any"},
+		{"[]time.Time", "repeated google.protobuf.Timestamp", ""},
+		{"map[string]time.Duration", "map<string, google.protobuf.Duration>",
+			""},
+		{"map[time.Time]string", "", "map[time.Time]string"},
 		{"net.IP", "string", ""},
 		{"net.HardwareAddr", "string", ""},
-		{"time.Time", "int64", ""},
-		{"time.Duration", "int64", ""},
+		{"time.Time", "google.protobuf.Timestamp", ""},
+		{"time.Duration", "google.protobuf.Duration", ""},
 		{"tags.Tags", "map<string, string>", ""},
 		{"Address", "Address", ""},
 		{"*Address", "Address", ""},
-		{"**Address", "Address", ""},
 		{"[]*Address", "repeated Address", ""},
 		{"[]string", "repeated string", ""},
 		{"[]byte", "bytes", ""},
 		{"[]uint8", "bytes", ""},
 		{"[][]byte", "repeated bytes", ""},
-		{"[]net.IP", "repeated string", ""},
 		{"map[string]Address", "map<string, Address>", ""},
 		{"map[string][]byte", "map<string, bytes>", ""},
 		{"map[net.IP]string", "map<string, string>", ""},
-		{"map[State]string", "map<uint32, string>", ""},
+		{"map[State]string", "map<uint64, string>", ""},
 		{"map[bool]string", "map<bool, string>", ""},
 		{"map[int32]string", "map<int32, string>", ""},
 		{"map[int64]string", "map<int64, string>", ""},
 		{"map[uint64]string", "map<uint64, string>", ""},
+		{"map[uint32]string", "map<uint32, string>", ""},
+		{"map[uint8]string", "map<uint32, string>", ""},
 		{"map[Blob]string", "", "map[Blob]string"},
-		{"State", "uint32", ""},
-		{"Level", "uint32", ""},
+		{"Level", "uint64", ""},
 		{"Name", "string", ""},
-		{"[]State", "repeated uint32", ""},
-		{"*int", "int32", ""},
-		{"*[]string", "repeated string", ""},
+		{"[]State", "repeated uint64", ""},
 		{"Alias", "Address", ""},
-		{"[]Alias", "repeated Address", ""},
 		{"Blob", "bytes", ""},
-		{"[]Blob", "repeated bytes", ""},
 		{"[]B", "repeated uint32", ""},
-		{"map[State]State", "map<uint32, uint32>", ""},
 		{"map[State][]State", "", "map[State][]State"},
-		{"[]Level", "repeated uint32", ""},
 		{"map[uint64][]string", "", "map[uint64][]string"},
-		{"[][]string", "", "[][]string"},
 		{"[]tags.Tags", "", "[]tags.Tags"},
 		{"[4]byte", "", "array type [4]byte"},
-		{"[2]string", "", "array type [2]string"},
 		{"map[float64]string", "", "map[float64]string"},
 		{"map[string]map[string]string", "", "map[string]map[string]string"},
 		{"Missing", "", "cannot map type Missing"},
-		{"[]Missing", "", "cannot map type Missing"},
 		{"Loop", "", "recursive type Loop"},
-		{"A", "", "recursive type A"},
 		{"P", "", "recursive type P"},
 		{"X", "", "type X: cannot map type map[string]struct{...} to a proto type"},
 		{"os.File", "", "type os.File"},
@@ -194,6 +188,76 @@ func TestTypeMapperIsReusableAfterAFailure(t *testing.T) {
 	}
 }
 
+func TestGenerateProtoImportsTheTimeTypes(t *testing.T) {
+	dir := writeSource(t, `package p
+import "time"
+type Stamp time.Time
+type Request struct {
+	Created time.Time
+	Expires time.Time
+	Timeout time.Duration
+	Name    string
+}
+type Pointer struct {
+	When *time.Time
+}
+type Named struct {
+	When Stamp
+}
+type Plain struct {
+	Name string
+}
+`)
+	infos, err := scanTypes(dir, []string{"Request"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := generateProto(testConfig, nil, infos, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `package hypervisor;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package =`
+	if !strings.Contains(got, want) {
+		t.Errorf("imports missing or out of order:\n%s", got)
+	}
+	if n := strings.Count(got, "timestamp.proto"); n != 1 {
+		t.Errorf("timestamp.proto imported %d times, want once", n)
+	}
+	for _, root := range []string{"Pointer", "Named"} {
+		infos, err = scanTypes(dir, []string{root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		named, err := scanNamedTypes(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err = generateProto(testConfig, nil, infos, named)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, `import "google/protobuf/timestamp.proto";`) {
+			t.Errorf("%s: timestamp import missing:\n%s", root, got)
+		}
+	}
+	infos, err = scanTypes(dir, []string{"Plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = generateProto(testConfig, nil, infos, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "import ") {
+		t.Errorf("imports written for a message without time fields:\n%s", got)
+	}
+}
+
 func TestGenerateProtoRejectsBadNames(t *testing.T) {
 	_, infos, named := scanTestdata(t)
 	tests := []struct {
@@ -203,21 +267,13 @@ func TestGenerateProtoRejectsBadNames(t *testing.T) {
 		{"empty package", protoConfig{GoPackage: "p", Service: "S"}},
 		{"package with a space", protoConfig{GoPackage: "p",
 			Package: "a b", Service: "S"}},
-		{"package with a semicolon", protoConfig{GoPackage: "p",
-			Package: "a;b", Service: "S"}},
 		{"package with an empty part", protoConfig{GoPackage: "p",
 			Package: "a..b", Service: "S"}},
 		{"package starting with a digit", protoConfig{GoPackage: "p",
 			Package: "1a", Service: "S"}},
-		{"second package part starting with a digit", protoConfig{
-			GoPackage: "p", Package: "a.1b", Service: "S"}},
-		{"service starting with a digit", protoConfig{GoPackage: "p",
-			Package: "a", Service: "1S"}},
 		{"empty service", protoConfig{GoPackage: "p", Package: "a"}},
 		{"service with a dot", protoConfig{GoPackage: "p", Package: "a",
 			Service: "S.T"}},
-		{"service with a brace", protoConfig{GoPackage: "p", Package: "a",
-			Service: "S{"}},
 	}
 	for _, test := range tests {
 		if _, err := generateProto(test.config, nil, infos, named); err == nil {

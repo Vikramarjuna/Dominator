@@ -97,10 +97,8 @@ func scanTypes(dir string, rootNames []string) ([]typeInfo, error) {
 	return result, nil
 }
 
-// scanNamedTypes returns the underlying type, as Go source, of each named type
-// in the Go package in dir which is not a struct, such as "uint" for
-// "type State uint". It is keyed by the name of the type. An error is returned
-// if the package cannot be parsed.
+// scanNamedTypes returns the underlying type, as Go source, of each named
+// type in dir which is not a struct, such as "uint" for "type State uint".
 func scanNamedTypes(dir string) (map[string]string, error) {
 	files, err := parseDir(dir)
 	if err != nil {
