@@ -11,10 +11,18 @@ import (
 )
 
 var (
+	convOutFile = flag.String("convOut", "",
+		"File to write the generated converters to")
+	convPackage = flag.String("convPackage", "",
+		"Name of the Go package of the converters (with -convOut)")
 	goPackage = flag.String("goPackage", "",
-		"Import path of the generated Go code (with -out)")
+		"Import path of the generated proto Go code (with -out or -convOut)")
+	goTypesPackage = flag.String("goTypesPackage", "",
+		"Import path of the package containing the request and reply types "+
+			"(with -convOut)")
 	outFile = flag.String("out", "",
-		"File to write the generated .proto to. If empty, print the scan")
+		"File to write the generated .proto to. If neither -out nor "+
+			"-convOut is given, print the scan")
 	protoDir = flag.String("proto", "",
 		"Directory of the Go package containing the request and reply types")
 	protoPackage = flag.String("package", "",
@@ -24,6 +32,17 @@ var (
 	serviceName = flag.String("service", "",
 		"Name of the gRPC service (with -out)")
 )
+
+// outFlags holds the flags which control what is written.
+type outFlags struct {
+	convOut        string
+	convPackage    string
+	goPackage      string
+	goTypesPackage string
+	out            string
+	protoPackage   string
+	service        string
+}
 
 // printScan writes a description of the methods and the types they use.
 func printScan(methods []methodInfo, infos []typeInfo) {
@@ -44,24 +63,37 @@ func printScan(methods []methodInfo, infos []typeInfo) {
 	}
 }
 
-// checkOutFlags returns an error if the generation flags are inconsistent:
-// -goPackage, -package and -service must all be set with -out and none
-// without it.
-func checkOutFlags(out, goPkg, protoPkg, service string) error {
-	generating := goPkg != "" || protoPkg != "" || service != ""
-	if out == "" && generating {
-		return errors.New("-goPackage, -package and -service need -out")
+// checkOutFlags returns an error if the generation flags are inconsistent.
+// -goPackage, -package and -service are required with -out.
+// -goPackage, -convPackage and -goTypesPackage are required with -convOut.
+// Each is refused without the output that it belongs to.
+func checkOutFlags(flags outFlags) error {
+	if flags.out == "" && (flags.protoPackage != "" || flags.service != "") {
+		return errors.New("-package and -service need -out")
 	}
-	if out != "" && (goPkg == "" || protoPkg == "" || service == "") {
+	if flags.convOut == "" &&
+		(flags.convPackage != "" || flags.goTypesPackage != "") {
+		return errors.New("-convPackage and -goTypesPackage need -convOut")
+	}
+	if flags.out == "" && flags.convOut == "" && flags.goPackage != "" {
+		return errors.New("-goPackage needs -out or -convOut")
+	}
+	if flags.out != "" && (flags.goPackage == "" || flags.protoPackage == "" ||
+		flags.service == "") {
 		return errors.New(
 			"-goPackage, -package and -service are required with -out")
+	}
+	if flags.convOut != "" && (flags.goPackage == "" ||
+		flags.convPackage == "" || flags.goTypesPackage == "") {
+		return errors.New("-goPackage, -convPackage and -goTypesPackage " +
+			"are required with -convOut")
 	}
 	return nil
 }
 
 // doMain scans the annotated methods and their types. It writes the .proto
-// file if -out is given and prints the scan otherwise. It returns the process
-// exit status.
+// file if -out is given and the converters if -convOut is given, and prints
+// the scan if neither is. It returns the process exit status.
 func doMain() int {
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: proto-gen -rpcd dir -proto dir")
@@ -79,7 +111,15 @@ func doMain() int {
 		flag.Usage()
 		return 2
 	}
-	err = checkOutFlags(*outFile, *goPackage, *protoPackage, *serviceName)
+	err = checkOutFlags(outFlags{
+		convOut:        *convOutFile,
+		convPackage:    *convPackage,
+		goPackage:      *goPackage,
+		goTypesPackage: *goTypesPackage,
+		out:            *outFile,
+		protoPackage:   *protoPackage,
+		service:        *serviceName,
+	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		flag.Usage()
@@ -95,7 +135,7 @@ func doMain() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if *outFile == "" {
+	if *outFile == "" && *convOutFile == "" {
 		printScan(methods, infos)
 		return 0
 	}
@@ -104,20 +144,45 @@ func doMain() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	config := protoConfig{
-		GoPackage: *goPackage,
-		Package:   *protoPackage,
-		Service:   *serviceName,
+	var protoText, convText string
+	if *outFile != "" {
+		config := protoConfig{
+			GoPackage: *goPackage,
+			Package:   *protoPackage,
+			Service:   *serviceName,
+		}
+		protoText, err = generateProto(config, methods, infos, named)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 	}
-	text, err := generateProto(config, methods, infos, named)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+	if *convOutFile != "" {
+		config := convConfig{
+			GoPackage:    *goPackage,
+			Package:      *convPackage,
+			TypesPackage: *goTypesPackage,
+		}
+		convText, err = generateConverters(config, infos, named)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 	}
-	err = os.WriteFile(*outFile, []byte(text), fsutil.PublicFilePerms)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+	if *outFile != "" {
+		err = os.WriteFile(*outFile, []byte(protoText), fsutil.PublicFilePerms)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	}
+	if *convOutFile != "" {
+		err = os.WriteFile(*convOutFile, []byte(convText),
+			fsutil.PublicFilePerms)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 	}
 	return 0
 }
